@@ -37,7 +37,7 @@ Codebase graph analysis for AI agents. Goes beyond simple RAG — builds call gr
 
 ```bash
 cd your-project
-npx @aidevkit/graph setup
+npx -p @aidevkit/graph aidevkit-setup
 ```
 
 That's it. This single command:
