@@ -7,11 +7,11 @@
   "main": "dist/index.js",
   "bin": {
     "aidevkit-graph": "dist/scripts/setup.js",
-    "aidevkit-server": "dist/index.js",
-    "aidevkit-init": "dist/scripts/init.js",
-    "aidevkit-reindex": "dist/scripts/reindex.js",
-    "aidevkit-check-docstrings": "dist/scripts/check-docstrings.js",
-    "aidevkit-setup": "dist/scripts/setup.js"
+    "graph-server": "dist/index.js",
+    "graph-init": "dist/scripts/init.js",
+    "graph-reindex": "dist/scripts/reindex.js",
+    "graph-check-docstrings": "dist/scripts/check-docstrings.js",
+    "graph-setup": "dist/scripts/setup.js"
   },
   "files": [
     "dist/**/*.js",

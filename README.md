@@ -56,7 +56,7 @@ If you prefer step-by-step:
 ```bash
 npm install -g @aidevkit/graph
 ollama pull qwen3-embedding:0.6b
-aidevkit-init
+graph-init
 ```
 
 Add to Claude Code global config (`~/.claude/settings.json`):
@@ -65,7 +65,7 @@ Add to Claude Code global config (`~/.claude/settings.json`):
 {
   "mcpServers": {
     "aidevkit": {
-      "command": "aidevkit-server"
+      "command": "graph-server"
     }
   }
 }
@@ -110,13 +110,13 @@ Tools require `workspace` parameter when multiple workspaces are detected:
 
 ```bash
 # Initialize index + embeddings
-aidevkit-init [path] [--force] [--no-embed]
+graph-init [path] [--force] [--no-embed]
 
 # Incremental reindex
-aidevkit-reindex [--all] [--files=a.py,b.ts] [--stdin]
+graph-reindex [--all] [--files=a.py,b.ts] [--stdin]
 
 # Check docstring coverage
-aidevkit-check-docstrings [--strict] [files...]
+graph-check-docstrings [--strict] [files...]
 ```
 
 ## Configuration

@@ -32,12 +32,12 @@ async function main() {
 
   // === Step 1: Install package globally ===
   step("1/5 Checking @aidevkit/graph installation...");
-  if (commandExists("aidevkit-server")) {
+  if (commandExists("graph-server")) {
     ok("@aidevkit/graph is installed");
   } else {
     log("Installing @aidevkit/graph globally...");
     run("npm install -g @aidevkit/graph --legacy-peer-deps", { stdio: "inherit" });
-    if (commandExists("aidevkit-server")) {
+    if (commandExists("graph-server")) {
       ok("Installed successfully");
     } else {
       warn("Installation failed. Try manually: npm install -g @aidevkit/graph");
@@ -140,7 +140,7 @@ async function main() {
     ok("MCP server already configured in Claude Code");
   } else {
     settings.mcpServers.aidevkit = {
-      command: "aidevkit-server",
+      command: "graph-server",
     };
     writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
     ok("Added aidevkit MCP server to ~/.claude/settings.json");
@@ -152,10 +152,10 @@ async function main() {
   const codeContextDir = path.join(cwd, ".code-context");
 
   if (existsSync(path.join(codeContextDir, "ast-cache"))) {
-    ok("Project already indexed. Run 'aidevkit-init --force' to rebuild.");
+    ok("Project already indexed. Run 'graph-init --force' to rebuild.");
   } else {
     log("Indexing current project...");
-    run("aidevkit-init", { stdio: "inherit" });
+    run("graph-init", { stdio: "inherit" });
     ok("Project indexed");
   }
 
