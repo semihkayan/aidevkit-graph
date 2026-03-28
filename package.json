@@ -46,11 +46,11 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/semihkayan/codesight-graph.git"
+    "url": "git+https://github.com/CosmicDust19/codesight-graph.git"
   },
-  "homepage": "https://github.com/semihkayan/codesight-graph#readme",
+  "homepage": "https://github.com/CosmicDust19/codesight-graph#readme",
   "bugs": {
-    "url": "https://github.com/semihkayan/codesight-graph/issues"
+    "url": "https://github.com/CosmicDust19/codesight-graph/issues"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.28.0",
