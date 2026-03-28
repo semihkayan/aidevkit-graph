@@ -6,10 +6,11 @@
   "engines": { "node": ">=20.0.0" },
   "main": "dist/index.js",
   "bin": {
+    "aidevkit-graph": "dist/scripts/setup.js",
+    "aidevkit-server": "dist/index.js",
     "aidevkit-init": "dist/scripts/init.js",
     "aidevkit-reindex": "dist/scripts/reindex.js",
     "aidevkit-check-docstrings": "dist/scripts/check-docstrings.js",
-    "aidevkit-graph": "dist/index.js",
     "aidevkit-setup": "dist/scripts/setup.js"
   },
   "files": [

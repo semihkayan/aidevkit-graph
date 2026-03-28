@@ -32,12 +32,12 @@ async function main() {
 
   // === Step 1: Install package globally ===
   step("1/5 Checking @aidevkit/graph installation...");
-  if (commandExists("aidevkit-graph")) {
-    ok("aidevkit-graph is installed");
+  if (commandExists("aidevkit-server")) {
+    ok("@aidevkit/graph is installed");
   } else {
     log("Installing @aidevkit/graph globally...");
     run("npm install -g @aidevkit/graph --legacy-peer-deps", { stdio: "inherit" });
-    if (commandExists("aidevkit-graph")) {
+    if (commandExists("aidevkit-server")) {
       ok("Installed successfully");
     } else {
       warn("Installation failed. Try manually: npm install -g @aidevkit/graph");
@@ -140,7 +140,7 @@ async function main() {
     ok("MCP server already configured in Claude Code");
   } else {
     settings.mcpServers.aidevkit = {
-      command: "aidevkit-graph",
+      command: "aidevkit-server",
     };
     writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
     ok("Added aidevkit MCP server to ~/.claude/settings.json");

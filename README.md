@@ -37,7 +37,7 @@ Codebase graph analysis for AI agents. Goes beyond simple RAG — builds call gr
 
 ```bash
 cd your-project
-npx -p @aidevkit/graph aidevkit-setup
+npx @aidevkit/graph
 ```
 
 That's it. This single command:
@@ -65,7 +65,7 @@ Add to Claude Code global config (`~/.claude/settings.json`):
 {
   "mcpServers": {
     "aidevkit": {
-      "command": "aidevkit-graph"
+      "command": "aidevkit-server"
     }
   }
 }
