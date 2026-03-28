@@ -46,11 +46,11 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/CosmicDust19/aidevkit-graph.git"
+    "url": "git+https://github.com/semihkayan/aidevkit-graph.git"
   },
-  "homepage": "https://github.com/CosmicDust19/aidevkit-graph#readme",
+  "homepage": "https://github.com/semihkayan/aidevkit-graph#readme",
   "bugs": {
-    "url": "https://github.com/CosmicDust19/aidevkit-graph/issues"
+    "url": "https://github.com/semihkayan/aidevkit-graph/issues"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.28.0",
