@@ -1,4 +1,4 @@
-# @codesight/graph
+# @aidevkit/graph
 
 Codebase graph analysis for AI agents. Goes beyond simple RAG — builds call graphs, type graphs, and dependency trees so AI actually understands your code structure.
 
@@ -37,7 +37,7 @@ Codebase graph analysis for AI agents. Goes beyond simple RAG — builds call gr
 
 ```bash
 # 1. Install
-npm install -g @codesight/graph
+npm install -g @aidevkit/graph
 
 # 2. Install Ollama + embedding model
 brew install ollama
@@ -45,7 +45,7 @@ ollama pull qwen3-embedding:0.6b
 
 # 3. Initialize your project
 cd your-project
-codesight-init
+aidevkit-init
 
 # 4. Add to Claude Desktop config (~/.claude/claude_desktop_config.json)
 ```
@@ -53,8 +53,8 @@ codesight-init
 ```json
 {
   "mcpServers": {
-    "codesight-graph": {
-      "command": "codesight-graph",
+    "aidevkit-graph": {
+      "command": "aidevkit-graph",
       "args": [],
       "cwd": "/path/to/your/project"
     }
@@ -101,13 +101,13 @@ Tools require `workspace` parameter when multiple workspaces are detected:
 
 ```bash
 # Initialize index + embeddings
-codesight-init [path] [--force] [--no-embed]
+aidevkit-init [path] [--force] [--no-embed]
 
 # Incremental reindex
-codesight-reindex [--all] [--files=a.py,b.ts] [--stdin]
+aidevkit-reindex [--all] [--files=a.py,b.ts] [--stdin]
 
 # Check docstring coverage
-codesight-check-docstrings [--strict] [files...]
+aidevkit-check-docstrings [--strict] [files...]
 ```
 
 ## Configuration

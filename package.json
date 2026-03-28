@@ -1,15 +1,15 @@
 {
-  "name": "@codesight/graph",
+  "name": "@aidevkit/graph",
   "version": "0.1.0",
   "description": "Codebase graph analysis for AI agents — AST + call graph + type graph + hybrid semantic search via MCP",
   "type": "module",
   "engines": { "node": ">=20.0.0" },
   "main": "dist/index.js",
   "bin": {
-    "codesight-init": "dist/scripts/init.js",
-    "codesight-reindex": "dist/scripts/reindex.js",
-    "codesight-check-docstrings": "dist/scripts/check-docstrings.js",
-    "codesight-graph": "dist/index.js"
+    "aidevkit-init": "dist/scripts/init.js",
+    "aidevkit-reindex": "dist/scripts/reindex.js",
+    "aidevkit-check-docstrings": "dist/scripts/check-docstrings.js",
+    "aidevkit-graph": "dist/index.js"
   },
   "files": [
     "dist/**/*.js",
@@ -46,11 +46,11 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/CosmicDust19/codesight-graph.git"
+    "url": "git+https://github.com/CosmicDust19/aidevkit-graph.git"
   },
-  "homepage": "https://github.com/CosmicDust19/codesight-graph#readme",
+  "homepage": "https://github.com/CosmicDust19/aidevkit-graph#readme",
   "bugs": {
-    "url": "https://github.com/CosmicDust19/codesight-graph/issues"
+    "url": "https://github.com/CosmicDust19/aidevkit-graph/issues"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.28.0",
