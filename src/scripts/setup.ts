@@ -207,30 +207,28 @@ async function main() {
 
   // === Step 4: Configure Claude Code ===
   step("4/5 Configuring Claude Code...");
-  const claudeDir = path.join(os.homedir(), ".claude");
-  const settingsPath = path.join(claudeDir, "settings.json");
+  const claudeProjectDir = path.join(cwd, ".claude");
+  const projectSettingsPath = path.join(claudeProjectDir, "settings.json");
 
-  if (!existsSync(claudeDir)) mkdirSync(claudeDir, { recursive: true });
+  if (!existsSync(claudeProjectDir)) mkdirSync(claudeProjectDir, { recursive: true });
 
-  let settings: Record<string, any> = {};
-  if (existsSync(settingsPath)) {
-    try { settings = JSON.parse(readFileSync(settingsPath, "utf-8")); } catch { settings = {}; }
+  let projectSettings: Record<string, any> = {};
+  if (existsSync(projectSettingsPath)) {
+    try { projectSettings = JSON.parse(readFileSync(projectSettingsPath, "utf-8")); } catch { projectSettings = {}; }
   }
 
-  if (typeof settings.mcpServers !== "object" || settings.mcpServers === null) {
-    settings.mcpServers = {};
-  }
-
-  if (settings.mcpServers.aidevkit) {
+  if (projectSettings.mcpServers?.aidevkit) {
     ok("Already configured");
   } else {
-    settings.mcpServers.aidevkit = { command: "graph-server" };
-    // Atomic write: write to temp file then rename
-    const tmpPath = settingsPath + ".tmp";
-    writeFileSync(tmpPath, JSON.stringify(settings, null, 2));
+    if (typeof projectSettings.mcpServers !== "object" || projectSettings.mcpServers === null) {
+      projectSettings.mcpServers = {};
+    }
+    projectSettings.mcpServers.aidevkit = { command: "graph-server" };
+    const tmpPath = projectSettingsPath + ".tmp";
+    writeFileSync(tmpPath, JSON.stringify(projectSettings, null, 2));
     const { renameSync } = await import("node:fs");
-    renameSync(tmpPath, settingsPath);
-    ok("Added to ~/.claude/settings.json");
+    renameSync(tmpPath, projectSettingsPath);
+    ok("Added to .claude/settings.json");
   }
 
   // === Step 5: Index project ===

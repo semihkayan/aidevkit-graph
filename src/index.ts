@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import path from "node:path";
@@ -31,52 +32,7 @@ async function main() {
   const services = await createServices();
   logger.info({ projectRoot: services.config.projectRoot }, "Code Intelligence MCP Server starting");
 
-  // Initialize: load index from disk, build if empty
-  for (const wsPath of services.workspacePaths) {
-    const ws = services.resolveWorkspace(wsPath);
-    await ws.indexWriter.loadFromDisk();
-
-    const stats = ws.index.getStats();
-    if (stats.files === 0) {
-      logger.info({ workspace: wsPath }, "Empty index, building...");
-      await ws.indexWriter.buildFull(ws.projectRoot);
-      await ws.indexWriter.saveToDisk();
-      const newStats = ws.index.getStats();
-      logger.info({ workspace: wsPath, ...newStats }, "Index built");
-    } else {
-      logger.info({ workspace: wsPath, ...stats }, "Index loaded from cache");
-    }
-
-    // Initialize vector DB
-    const lancePath = path.join(services.config.projectRoot, ".code-context", "lance");
-    const tableName = wsPath === "." ? "functions" : `${wsPath}_functions`;
-    await ws.vectorDb.initialize(lancePath, tableName);
-    const vectorCount = await ws.vectorDb.countRows();
-    logger.info({ workspace: wsPath, vectorCount }, "Vector DB initialized");
-
-    // Embed if Ollama available and vectors empty
-    if (services.embeddingAvailable && vectorCount === 0) {
-      logger.info({ workspace: wsPath }, "Embedding all functions...");
-      const allIds = ws.index.getAllFilePaths().flatMap(fp => ws.index.getFileRecordIds(fp));
-      const { reembedFunctions } = await import("./core/reembed.js");
-      await reembedFunctions(allIds, ws.index, services.embedding, ws.vectorDb, services.config);
-      const newCount = await ws.vectorDb.countRows();
-      logger.info({ workspace: wsPath, embedded: newCount }, "Embedding complete");
-    }
-
-    // Build call graph + type graph
-    await ws.callGraphWriter.build(ws.index, ws.projectRoot);
-    await ws.typeGraphWriter.build(ws.index, services.parsers, ws.projectRoot);
-    const cgStats = ws.callGraph.getStats();
-    const tgStats = ws.typeGraph.getStats();
-    logger.info({ workspace: wsPath, ...cgStats, ...tgStats }, "Call graph + type graph built");
-  }
-
-  // Start file watcher — auto-reindex on file changes
-  services.watcher.start();
-  logger.info("File watcher started. Auto-reindex on changes (debounce 500ms, min interval 2s).");
-
-  // MCP Server
+  // MCP Server — connect FIRST so Claude Code doesn't timeout
   const server = new McpServer({ name: "code-intelligence", version: "0.1.0" });
   const ctx = services;
 
@@ -124,10 +80,55 @@ async function main() {
   process.on("SIGTERM", shutdown);
   process.on("SIGINT", shutdown);
 
-  // Start
+  // Connect transport immediately — MCP handshake completes fast
   const transport = new StdioServerTransport();
   await server.connect(transport);
   logger.info("MCP server connected via stdio");
+
+  // Initialize index AFTER connection — heavy work in background
+  for (const wsPath of services.workspacePaths) {
+    const ws = services.resolveWorkspace(wsPath);
+    await ws.indexWriter.loadFromDisk();
+
+    const stats = ws.index.getStats();
+    if (stats.files === 0) {
+      logger.info({ workspace: wsPath }, "Empty index, building...");
+      await ws.indexWriter.buildFull(ws.projectRoot);
+      await ws.indexWriter.saveToDisk();
+      const newStats = ws.index.getStats();
+      logger.info({ workspace: wsPath, ...newStats }, "Index built");
+    } else {
+      logger.info({ workspace: wsPath, ...stats }, "Index loaded from cache");
+    }
+
+    // Initialize vector DB
+    const lancePath = path.join(services.config.projectRoot, ".code-context", "lance");
+    const tableName = wsPath === "." ? "functions" : `${wsPath}_functions`;
+    await ws.vectorDb.initialize(lancePath, tableName);
+    const vectorCount = await ws.vectorDb.countRows();
+    logger.info({ workspace: wsPath, vectorCount }, "Vector DB initialized");
+
+    // Embed if Ollama available and vectors empty
+    if (services.embeddingAvailable && vectorCount === 0) {
+      logger.info({ workspace: wsPath }, "Embedding all functions...");
+      const allIds = ws.index.getAllFilePaths().flatMap(fp => ws.index.getFileRecordIds(fp));
+      const { reembedFunctions } = await import("./core/reembed.js");
+      await reembedFunctions(allIds, ws.index, services.embedding, ws.vectorDb, services.config);
+      const newCount = await ws.vectorDb.countRows();
+      logger.info({ workspace: wsPath, embedded: newCount }, "Embedding complete");
+    }
+
+    // Build call graph + type graph
+    await ws.callGraphWriter.build(ws.index, ws.projectRoot);
+    await ws.typeGraphWriter.build(ws.index, services.parsers, ws.projectRoot);
+    const cgStats = ws.callGraph.getStats();
+    const tgStats = ws.typeGraph.getStats();
+    logger.info({ workspace: wsPath, ...cgStats, ...tgStats }, "Call graph + type graph built");
+  }
+
+  // Start file watcher — auto-reindex on file changes
+  services.watcher.start();
+  logger.info("File watcher started. Initialization complete.");
 }
 
 main().catch((err) => {

@@ -41,6 +41,7 @@ export class FileWatcher implements IFileWatcher {
     this.watcher.on("change", (fp: string) => this.enqueue(fp));
     this.watcher.on("add", (fp: string) => this.enqueue(fp));
     this.watcher.on("unlink", (fp: string) => this.enqueue(fp));
+    this.watcher.on("error", (err: unknown) => logger.warn({ err }, "FileWatcher error (ignored)"));
 
     logger.info("FileWatcher started");
   }

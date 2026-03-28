@@ -59,7 +59,7 @@ const ConfigSchema = z.object({
 });
 
 export async function loadConfig(projectRoot?: string): Promise<Config> {
-  const root = path.resolve(projectRoot || process.cwd());
+  const root = path.resolve(projectRoot || process.env.GRAPH_PROJECT_ROOT || process.cwd());
   const configPath = path.join(root, ".code-context", "config.yaml");
 
   let rawConfig: Record<string, unknown> = {};
