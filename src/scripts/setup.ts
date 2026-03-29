@@ -201,7 +201,12 @@ async function main() {
       } else {
         log(`Pulling ${OLLAMA_MODEL}...`);
         runOrNull(`ollama pull ${OLLAMA_MODEL}`, { stdio: "inherit" });
-        ok("Model downloaded");
+        const modelsAfter = runOrNull("ollama list") || "";
+        if (modelsAfter.includes(OLLAMA_MODEL.split(":")[0])) {
+          ok("Model downloaded");
+        } else {
+          warn("Model download failed. Try manually: ollama pull " + OLLAMA_MODEL);
+        }
       }
     }
   }
