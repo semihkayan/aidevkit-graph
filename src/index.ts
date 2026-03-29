@@ -37,57 +37,70 @@ async function main() {
   const server = new McpServer({ name: "code-intelligence", version: "0.1.0" });
   const ctx = services;
 
-  server.registerTool("semantic_search",
-    { description: "Hybrid search: vector + BM25 with natural language", inputSchema: SemanticSearchSchema.shape },
-    (args) => handleSemanticSearch(args as any, ctx));
+  server.registerTool("semantic_search", {
+    description: "Search the codebase by meaning. Use INSTEAD OF grep/glob when looking for code related to a concept, feature, or bug. Finds functions even when you don't know exact names. Returns ranked results with signatures and file locations.",
+    inputSchema: SemanticSearchSchema.shape,
+  }, (args) => handleSemanticSearch(args as any, ctx));
 
-  server.registerTool("get_module_summary",
-    { description: "Function/class metadata with progressive disclosure", inputSchema: ModuleSummarySchema.shape },
-    (args) => handleModuleSummary(args as any, ctx));
+  server.registerTool("get_module_summary", {
+    description: "List all functions and classes in a directory with their signatures. Use BEFORE reading files to understand what a module contains — saves tokens by showing metadata without source code. Auto-adapts detail level: full for small modules, compact for large ones.",
+    inputSchema: ModuleSummarySchema.shape,
+  }, (args) => handleModuleSummary(args as any, ctx));
 
-  server.registerTool("get_function_source",
-    { description: "Source code of a single function", inputSchema: FunctionSourceSchema.shape },
-    (args) => handleFunctionSource(args as any, ctx));
+  server.registerTool("get_function_source", {
+    description: "Get the source code of a specific function by name. Use INSTEAD OF reading entire files — returns only the function you need, saving tokens. Supports surrounding context lines.",
+    inputSchema: FunctionSourceSchema.shape,
+  }, (args) => handleFunctionSource(args as any, ctx));
 
-  server.registerTool("get_file_structure",
-    { description: "Project directory structure with AST stats", inputSchema: FileStructureSchema.shape },
-    (args) => handleFileStructure(args as any, ctx));
+  server.registerTool("get_file_structure", {
+    description: "Get the project directory tree with function/class counts per directory. Use to orient yourself in an unfamiliar codebase or understand project layout.",
+    inputSchema: FileStructureSchema.shape,
+  }, (args) => handleFileStructure(args as any, ctx));
 
-  server.registerTool("search_by_tags",
-    { description: "Tag-based exact match search", inputSchema: TagSearchSchema.shape },
-    (args) => handleTagSearch(args as any, ctx));
+  server.registerTool("search_by_tags", {
+    description: "Find functions by their @tags annotations. Use when you know the domain concept (e.g., 'payment', 'auth', 'cache'). Returns empty if codebase has no @tags docstring annotations.",
+    inputSchema: TagSearchSchema.shape,
+  }, (args) => handleTagSearch(args as any, ctx));
 
-  server.registerTool("get_dependencies",
-    { description: "Forward call graph with cross-validation", inputSchema: DependenciesSchema.shape },
-    (args) => handleDependencies(args as any, ctx));
+  server.registerTool("get_dependencies", {
+    description: "Show what a function calls — its forward dependencies. Cross-validates AST analysis with @deps docstring annotations. Categorizes each dependency as confirmed (AST+docstring), AST-only, docstring-only, or unresolved.",
+    inputSchema: DependenciesSchema.shape,
+  }, (args) => handleDependencies(args as any, ctx));
 
-  server.registerTool("get_callers",
-    { description: "Reverse call graph", inputSchema: CallersSchema.shape },
-    (args) => handleCallers(args as any, ctx));
+  server.registerTool("get_callers", {
+    description: "Show where a function is called from — reverse call graph. Use this to understand impact before modifying a function. Essential for safe refactoring.",
+    inputSchema: CallersSchema.shape,
+  }, (args) => handleCallers(args as any, ctx));
 
-  server.registerTool("get_dependency_graph",
-    { description: "Transitive dependency tree", inputSchema: DependencyGraphSchema.shape },
-    (args) => handleDependencyGraph(args as any, ctx));
+  server.registerTool("get_dependency_graph", {
+    description: "Visualize the full dependency tree of a function — what it calls, what those call, etc. Supports downstream (callees), upstream (callers), or both directions. Detects circular dependencies.",
+    inputSchema: DependencyGraphSchema.shape,
+  }, (args) => handleDependencyGraph(args as any, ctx));
 
-  server.registerTool("get_impact_analysis",
-    { description: "Change impact analysis", inputSchema: ImpactAnalysisSchema.shape },
-    (args) => handleImpactAnalysis(args as any, ctx));
+  server.registerTool("get_impact_analysis", {
+    description: "Assess the blast radius of changing a function. Use BEFORE refactoring or modifying signatures. Combines call graph + type graph to find all affected code. Returns risk levels: high (direct callers + signature change), medium (indirect), low (transitive).",
+    inputSchema: ImpactAnalysisSchema.shape,
+  }, (args) => handleImpactAnalysis(args as any, ctx));
 
-  server.registerTool("get_recent_changes",
-    { description: "Recent git changes at function level", inputSchema: RecentChangesSchema.shape },
-    (args) => handleRecentChanges(args as any, ctx));
+  server.registerTool("get_recent_changes", {
+    description: "Show recent git changes mapped to function level. See which functions were added, modified, or deleted in recent commits.",
+    inputSchema: RecentChangesSchema.shape,
+  }, (args) => handleRecentChanges(args as any, ctx));
 
-  server.registerTool("get_stale_docstrings",
-    { description: "Detect outdated or missing docstrings", inputSchema: StaleDocstringsSchema.shape },
-    (args) => handleStaleDocstrings(args as any, ctx));
+  server.registerTool("get_stale_docstrings", {
+    description: "Find functions with missing or outdated docstrings. Detects: missing docstrings, @deps that don't match actual AST calls, missing @tags. Use for codebase hygiene.",
+    inputSchema: StaleDocstringsSchema.shape,
+  }, (args) => handleStaleDocstrings(args as any, ctx));
 
-  server.registerTool("reindex",
-    { description: "Manual index update with optional re-embedding", inputSchema: ReindexSchema.shape },
-    (args) => handleReindex(args as any, ctx));
+  server.registerTool("reindex", {
+    description: "Manually update the code index. Usually not needed — the server auto-reindexes on file changes. Use after bulk operations or if index seems stale.",
+    inputSchema: ReindexSchema.shape,
+  }, (args) => handleReindex(args as any, ctx));
 
-  server.registerTool("get_index_status",
-    { description: "Index health and statistics", inputSchema: IndexStatusSchema.shape },
-    (args) => handleIndexStatus(args as any, ctx));
+  server.registerTool("get_index_status", {
+    description: "Check index health: how many files/functions are indexed, embedding status, call graph stats, docstring coverage, and language breakdown.",
+    inputSchema: IndexStatusSchema.shape,
+  }, (args) => handleIndexStatus(args as any, ctx));
 
   // Graceful shutdown with timeout
   const shutdown = () => {
