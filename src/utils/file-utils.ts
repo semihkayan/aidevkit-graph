@@ -45,13 +45,34 @@ export async function globSourceFiles(projectRoot: string, config: Config): Prom
   return valid;
 }
 
+// Common source root prefixes to strip from module paths (order: longest first)
+const AUTO_SOURCE_ROOTS = [
+  "src/main/java/",
+  "src/main/kotlin/",
+  "src/test/java/",
+  "src/test/kotlin/",
+  "src/",
+  "lib/",
+  "app/",
+];
+
 // Compute module path from file path
 export function computeModule(filePath: string, projectRoot: string, sourceRoot?: string): string {
-  let relative = path.relative(projectRoot, filePath);
+  let relative = projectRoot ? path.relative(projectRoot, filePath) : filePath;
+  // Normalize to forward slashes for consistent matching
+  relative = relative.replace(/\\/g, "/");
 
-  // Strip sourceRoot if configured (e.g., "src/")
-  if (sourceRoot && relative.startsWith(sourceRoot + path.sep)) {
+  // Strip explicit sourceRoot if configured
+  if (sourceRoot && relative.startsWith(sourceRoot + "/")) {
     relative = relative.slice(sourceRoot.length + 1);
+  } else if (!sourceRoot) {
+    // Auto-detect: strip common source root prefixes
+    for (const prefix of AUTO_SOURCE_ROOTS) {
+      if (relative.startsWith(prefix)) {
+        relative = relative.slice(prefix.length);
+        break;
+      }
+    }
   }
 
   // Module = directory path (without filename)

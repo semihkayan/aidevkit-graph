@@ -168,7 +168,22 @@ export class FunctionIndex implements IFunctionIndexReader, IFunctionIndexWriter
 
   async loadFromDisk(): Promise<void> {
     const { records, hashes } = await this.recordStore.loadAll();
-    for (const record of records) this.addRecord(record);
+
+    // Deduplicate by ID and re-normalize module paths to match current sourceRoot config.
+    // Cache may contain records from different config eras (e.g., before sourceRoot auto-detection).
+    const seen = new Set<string>();
+    for (const record of records) {
+      if (seen.has(record.id)) continue;
+      seen.add(record.id);
+
+      // Re-compute module to match current sourceRoot config
+      const correctModule = computeModule(record.filePath, "", this.config.parser.sourceRoot);
+      if (record.module !== correctModule) {
+        record.module = correctModule;
+      }
+
+      this.addRecord(record);
+    }
     this.fileHashes = hashes;
   }
 
@@ -251,6 +266,11 @@ export class FunctionIndex implements IFunctionIndexReader, IFunctionIndexWriter
   // === Private ===
 
   private addRecord(record: FunctionRecord): void {
+    // If this ID already exists, remove old index entries first to prevent duplicates
+    if (this.records.has(record.id)) {
+      this.removeRecord(record.id);
+    }
+
     this.records.set(record.id, record);
 
     // File index

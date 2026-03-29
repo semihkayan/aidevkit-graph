@@ -109,7 +109,7 @@ export class LanceDBStore implements IVectorDatabase, IFullTextSearch {
       let where = `(name = '${escaped}' OR name LIKE '%.${escaped}')`;
       if (scope) {
         const s = escapeSql(scope);
-        where += ` AND (module = '${s}' OR module LIKE '${s}/%')`;
+        where += ` AND (module = '${s}' OR module LIKE '${s}/%' OR module LIKE '%/${s}' OR module LIKE '%/${s}/%')`;
       }
       const rows = await this.table.query().where(where).limit(10).toArray();
       return rows.map((row: any) => ({ id: row.id, row, score: 0 }));
@@ -156,7 +156,9 @@ export class LanceDBStore implements IVectorDatabase, IFullTextSearch {
     const conditions: string[] = [];
     if (filter.scope) {
       const s = escapeSql(filter.scope);
-      conditions.push(`(module = '${s}' OR module LIKE '${s}/%' OR filePath LIKE '${s}%')`);
+      // Exact match, prefix match, file path prefix, AND partial path match
+      // Partial: scope="streak" matches module="com/wordbox/streak/domain/model"
+      conditions.push(`(module = '${s}' OR module LIKE '${s}/%' OR filePath LIKE '${s}%' OR module LIKE '%/${s}' OR module LIKE '%/${s}/%')`);
     }
     if (filter.tags?.length) {
       conditions.push(filter.tags.map(t => `tags LIKE '%,${escapeSql(t)},%'`).join(" AND "));

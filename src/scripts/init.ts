@@ -40,6 +40,13 @@ async function main() {
   console.log(`Parsers loaded: ${parsers.length}`);
   console.log();
 
+  // Force mode: delete shared lance directory ONCE before all workspaces
+  if (force) {
+    const lancePath = path.join(resolvedRoot, ".code-context", "lance");
+    const { rmSync } = await import("node:fs");
+    try { rmSync(lancePath, { recursive: true, force: true }); } catch { /* may not exist */ }
+  }
+
   for (const wsPath of workspacePaths) {
     const wsRoot = wsPath === "." ? resolvedRoot : path.join(resolvedRoot, wsPath);
     const cacheDir = wsPath === "."
@@ -68,12 +75,6 @@ async function main() {
       if (await embedding.isAvailable()) {
         const lancePath = path.join(resolvedRoot, ".code-context", "lance");
         const tableName = wsPath === "." ? "functions" : `${wsPath}_functions`;
-
-        // Force mode: delete entire lance directory to eliminate stale data and corrupted deletion logs
-        if (force) {
-          const { rmSync } = await import("node:fs");
-          try { rmSync(lancePath, { recursive: true, force: true }); } catch { /* may not exist */ }
-        }
 
         const lanceStore = new LanceDBStore();
         await lanceStore.initialize(lancePath, tableName);
