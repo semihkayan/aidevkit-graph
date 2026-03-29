@@ -10,9 +10,10 @@ const OLLAMA_MODEL = "qwen3-embedding:0.6b";
 
 // === Helpers ===
 
+const warnings: string[] = [];
 function log(msg: string) { console.log(`  ${msg}`); }
 function ok(msg: string) { console.log(`  ✓ ${msg}`); }
-function warn(msg: string) { console.log(`  ⚠ ${msg}`); }
+function warn(msg: string) { console.log(`  ⚠ ${msg}`); warnings.push(msg); }
 function fail(msg: string) { console.error(`  ✗ ${msg}`); }
 function step(msg: string) { console.log(`\n> ${msg}`); }
 
@@ -186,7 +187,7 @@ async function main() {
       let started = false;
       for (let i = 0; i < 15; i++) {
         await sleep(1000);
-        if (await ollamaHealthCheck()) { started = true; break; }
+        if (await ollamaHealthCheck() && runOrNull("ollama list") !== null) { started = true; break; }
       }
       if (!started) {
         warn("Could not start Ollama. Start it manually: ollama serve");
@@ -238,7 +239,10 @@ async function main() {
   step("5/5 Indexing project...");
   const codeContextDir = path.join(cwd, ".code-context");
 
-  if (existsSync(path.join(codeContextDir, "ast-cache"))) {
+  const hasAstCache = existsSync(path.join(codeContextDir, "ast-cache"));
+  const hasVectors = existsSync(path.join(codeContextDir, "lance"));
+
+  if (hasAstCache && hasVectors) {
     ok("Already indexed. Run 'graph-init --force' to rebuild.");
   } else if (commandExists("graph-init")) {
     try {
@@ -255,6 +259,11 @@ async function main() {
   console.log("\n========================================");
   console.log("  Setup complete!");
   console.log("========================================\n");
+  if (warnings.length > 0) {
+    console.log("  Warnings:");
+    for (const w of warnings) console.log(`    ⚠ ${w}`);
+    console.log();
+  }
   console.log("  Open this project in Claude Code.");
   console.log("  Try: 'find the authentication code'");
   console.log("  Or:  'what calls this function?'\n");
