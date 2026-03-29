@@ -1,6 +1,8 @@
 # CLAUDE.md
 
-MCP server that provides codebase graph analysis tools to AI agents. Builds AST index, call graph, type graph, and hybrid semantic search (vector + BM25) for 7 languages.
+## What this project is
+
+This MCP server lets AI agents understand a codebase without reading every file into context. It locally builds an AST index, call graph, type graph, and vector search index, then exposes 13 tools the agent can query: find functions by meaning, trace call chains, assess refactoring risk — all returning just the information the agent needs. The agent pulls targeted context instead of dumping entire files, so token cost drops and answer quality rises.
 
 ## Build & Run
 

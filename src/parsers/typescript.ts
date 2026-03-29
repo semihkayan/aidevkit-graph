@@ -76,14 +76,15 @@ function extractFunctions(rootNode: SyntaxNode, _filePath: string): RawFunctionI
     const name = node.childForFieldName("name")?.text;
     if (!name) continue;
 
-    const docNode = node.parent?.type === "export_statement" ? node.parent : node;
+    const isExported = node.parent?.type === "export_statement";
+    const docNode = isExported ? node.parent : node;
     results.push({
       name,
       kind: "function",
       signature: buildSignature(name, getParams(node), getReturnType(node)),
       lineStart: (docNode).startPosition.row + 1,
       lineEnd: node.endPosition.row + 1,
-      visibility: "public",
+      visibility: isExported ? "public" : "private",
       isAsync: isAsync(node),
       docstring: getJSDoc(docNode) || undefined,
     });
@@ -99,14 +100,15 @@ function extractFunctions(rootNode: SyntaxNode, _filePath: string): RawFunctionI
       if (!nameNode || !valueNode || valueNode.type !== "arrow_function") continue;
 
       const name = nameNode.text;
-      const outerNode = decl.parent?.type === "export_statement" ? decl.parent : decl;
+      const isExported = decl.parent?.type === "export_statement";
+      const outerNode = isExported ? decl.parent : decl;
       results.push({
         name,
         kind: "function",
         signature: buildSignature(name, getParams(valueNode), getReturnType(valueNode)),
         lineStart: outerNode.startPosition.row + 1,
         lineEnd: decl.endPosition.row + 1,
-        visibility: "public",
+        visibility: isExported ? "public" : "private",
         isAsync: isAsync(valueNode),
         docstring: getJSDoc(outerNode) || undefined,
       });

@@ -38,8 +38,8 @@ const ConfigSchema = z.object({
     sourceRoot: z.string().optional(),
   }).default({}),
   moduleSummary: z.object({
-    compactThreshold: z.number().default(30),
-    filesOnlyThreshold: z.number().default(100),
+    compactThreshold: z.number().default(20),
+    filesOnlyThreshold: z.number().default(50),
     maxTokenBudget: z.number().default(4000),
   }).default({}),
   search: z.object({
@@ -74,5 +74,18 @@ export async function loadConfig(projectRoot?: string): Promise<Config> {
   }
 
   const parsed = ConfigSchema.parse({ ...rawConfig, projectRoot: root });
-  return parsed as Config;
+  const config = parsed as Config;
+
+  // Auto-detect sourceRoot if not explicitly configured
+  if (!config.parser.sourceRoot) {
+    const commonRoots = ["src", "lib", "app"];
+    for (const candidate of commonRoots) {
+      if (existsSync(path.join(root, candidate))) {
+        config.parser.sourceRoot = candidate;
+        break;
+      }
+    }
+  }
+
+  return config;
 }

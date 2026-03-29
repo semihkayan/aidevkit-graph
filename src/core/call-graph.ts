@@ -183,13 +183,11 @@ export class CallGraphManager implements ICallGraphReader, ICallGraphWriter {
   }
 
   getStats(): { nodes: number; edges: number; cycles: number } {
-    let totalEdges = 0;
     let resolvedEdges = 0;
     for (const entry of this.graph.values()) {
-      totalEdges += entry.calls.length;
       resolvedEdges += entry.calls.filter(c => c.resolvedId).length;
     }
-    return { nodes: this.graph.size, edges: resolvedEdges, totalEdges, cycles: 0 } as any;
+    return { nodes: this.graph.size, edges: resolvedEdges, cycles: 0 };
   }
 
   async saveToDisk(cacheDir: string, index: IFunctionIndexReader): Promise<void> {

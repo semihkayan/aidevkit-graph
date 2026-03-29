@@ -12,9 +12,23 @@ export async function handleModuleSummary(
 
   if (records.length === 0) {
     // Suggest similar modules
-    const allModules = ws.index.getAllModules();
+    const allModules = ws.index.getAllModules().filter(m => m.length > 0);
+    const query = args.module.toLowerCase();
     const suggestions = allModules
-      .filter(m => m.includes(args.module) || args.module.includes(m))
+      .filter(m => {
+        const ml = m.toLowerCase();
+        // Substring match
+        if (ml.includes(query) || query.includes(ml)) return true;
+        // Levenshtein-like: short query with 1-char difference (e.g., 'utls' vs 'utils')
+        if (Math.abs(ml.length - query.length) <= 1) {
+          let diff = 0;
+          for (let i = 0; i < Math.max(ml.length, query.length); i++) {
+            if (ml[i] !== query[i]) diff++;
+          }
+          if (diff <= 2) return true;
+        }
+        return false;
+      })
       .slice(0, 5);
 
     return errorResponse("MODULE_NOT_FOUND",
@@ -24,9 +38,16 @@ export async function handleModuleSummary(
   }
 
   // Filter by file if specified
-  const filtered = args.file
+  let filtered = args.file
     ? records.filter(r => r.filePath.endsWith(args.file!))
     : records;
+
+  // In auto/compact modes, hide private/protected members to reduce noise for AI
+  // Full mode shows everything including privates
+  const requestedDetail = args.detail || "auto";
+  if (requestedDetail === "auto" || requestedDetail === "compact") {
+    filtered = filtered.filter(r => r.visibility === "public");
+  }
 
   // Progressive disclosure
   const detail = args.detail || "auto";

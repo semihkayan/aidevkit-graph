@@ -36,7 +36,19 @@ export function resolveFunctionOrError(
   name: string,
   module?: string,
 ): { record: import("../types/index.js").FunctionRecord } | { error: ReturnType<typeof errorResponse> } {
-  const matches = ws.index.findByName(name, module);
+  let matches = ws.index.findByName(name, module);
+
+  // If module didn't match as a module path, try it as a file path hint
+  if (matches.length === 0 && module) {
+    const allMatches = ws.index.findByName(name);
+    const byFile = allMatches.filter(r =>
+      r.filePath.includes(module) || r.filePath.endsWith(module + ".ts") ||
+      r.filePath.endsWith(module + ".py") || r.filePath.endsWith(module + ".js") ||
+      r.filePath.endsWith(module + ".java") || r.filePath.endsWith(module + ".go") ||
+      r.filePath.endsWith(module + ".rs") || r.filePath.endsWith(module + ".cs")
+    );
+    if (byFile.length > 0) matches = byFile;
+  }
 
   if (matches.length === 0) {
     // Suggest similar names
@@ -58,11 +70,20 @@ export function resolveFunctionOrError(
     };
   }
 
-  if (matches.length > 1 && !module) {
+  if (matches.length > 1) {
+    // If module was given but still ambiguous (same module, different files),
+    // check if module is actually a file path hint
+    if (module) {
+      const fileMatch = matches.find(r =>
+        r.filePath.includes(module) || r.filePath.endsWith(module + ".ts") || r.filePath.endsWith(module + ".py") || r.filePath.endsWith(module + ".js")
+      );
+      if (fileMatch) return { record: fileMatch };
+    }
+
     return {
       error: errorResponse("AMBIGUOUS_FUNCTION",
-        `Multiple functions named '${name}'. Specify module to disambiguate.`,
-        undefined,
+        `Multiple functions named '${name}'.${module ? ` Module '${module}' still matches ${matches.length}.` : ""} Use module parameter with a file path hint to disambiguate.`,
+        `Example: module: '${matches[0].filePath.replace(/\.[^.]+$/, "").split("/").pop()}'`,
         { matches: matches.map(r => ({ name: r.name, module: r.module, file: r.filePath })) })
     };
   }

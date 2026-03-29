@@ -24,18 +24,18 @@ export class RRFMerger implements IResultMerger {
     const sorted = Array.from(scoreMap.values()).sort((a, b) => b.score - a.score);
     if (sorted.length === 0) return [];
 
-    // Normalize scores to 0-1 range (relative to best score)
-    const maxScore = sorted[0].score;
-    const minScore = sorted[sorted.length - 1]?.score || 0;
-    const range = maxScore - minScore;
+    // RRF scores: use raw scores (higher = better match).
+    // Max possible per-list score is 1/(k+1). With 2 lists, max = 2/(k+1).
+    // Normalize relative to theoretical max, not relative to best result.
+    // This way, weak results get low scores even if they're the "best" in a bad set.
+    const theoreticalMax = rankedLists.length / (this.k + 1);
 
     return sorted
       .slice(0, topK)
       .map(entry => {
-        // Normalized score: best result = 1.0, worst = 0.0
-        // Bonus for appearing in multiple lists
-        const normalized = range > 0 ? (entry.score - minScore) / range : 1;
-        const listBonus = entry.listCount > 1 ? 0.1 : 0; // Boost items found by both vector + FTS
+        const normalized = Math.min(1, entry.score / theoreticalMax);
+        // Bonus for appearing in multiple search sources (vector + FTS agree)
+        const listBonus = entry.listCount > 1 ? 0.05 : 0;
         const finalScore = Math.min(1, normalized + listBonus);
 
         return this.toSearchResult(entry.row, Math.round(finalScore * 1000) / 1000);

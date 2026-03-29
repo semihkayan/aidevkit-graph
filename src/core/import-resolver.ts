@@ -101,14 +101,28 @@ export class ImportResolver implements IImportResolver {
   private resolveRelative(fromDir: string, modulePath: string, projectRoot: string): string | null {
     const base = path.resolve(fromDir, modulePath);
 
+    // Direct file exists (e.g., importing a .json or exact path)
+    if (existsSync(base)) return path.relative(projectRoot, base);
+
+    // ESM convention: TS files import with .js extension but actual file is .ts
+    // e.g., import from "./tool-utils.js" → actual file is ./tool-utils.ts
+    if (base.endsWith(".js") || base.endsWith(".jsx")) {
+      const tsBase = base.replace(/\.jsx?$/, "");
+      const tsExtensions = [".ts", ".tsx", ".js", ".jsx"];
+      for (const ext of tsExtensions) {
+        const candidate = tsBase + ext;
+        if (existsSync(candidate)) return path.relative(projectRoot, candidate);
+      }
+    }
+
+    // No extension — try appending common extensions
     const extensions = [".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs", ".java", ".cs"];
     for (const ext of extensions) {
       const candidate = base + ext;
       if (existsSync(candidate)) return path.relative(projectRoot, candidate);
     }
 
-    if (existsSync(base)) return path.relative(projectRoot, base);
-
+    // Barrel/index resolution
     return this.resolveBarrel(base, projectRoot, new Set(), 0);
   }
 
