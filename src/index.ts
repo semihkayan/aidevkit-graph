@@ -170,16 +170,17 @@ async function main() {
       ? path.join(services.config.projectRoot, ".code-context")
       : path.join(services.config.projectRoot, ".code-context", wsPath);
 
-    const cgLoaded = await ws.callGraphWriter.loadFromDisk(graphCacheDir, ws.index);
-    if (!cgLoaded) {
-      await ws.callGraphWriter.build(ws.index, ws.projectRoot);
-      await ws.callGraphWriter.saveToDisk(graphCacheDir, ws.index);
-    }
-
+    // Type graph FIRST — call graph uses it for interface-based resolution
     const tgLoaded = await ws.typeGraphWriter.loadFromDisk(graphCacheDir, ws.index);
     if (!tgLoaded) {
       await ws.typeGraphWriter.build(ws.index, services.parsers, ws.projectRoot);
       await ws.typeGraphWriter.saveToDisk(graphCacheDir, ws.index);
+    }
+
+    const cgLoaded = await ws.callGraphWriter.loadFromDisk(graphCacheDir, ws.index);
+    if (!cgLoaded) {
+      await ws.callGraphWriter.build(ws.index, ws.projectRoot);
+      await ws.callGraphWriter.saveToDisk(graphCacheDir, ws.index);
     }
 
     const cgStats = ws.callGraph.getStats();

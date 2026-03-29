@@ -1,5 +1,6 @@
 import type {
   ICallGraphReader, ICallGraphWriter, IFunctionIndexReader, IImportResolver, ILanguageParser,
+  ITypeGraphReader,
 } from "../types/interfaces.js";
 import type { CallGraph, CallGraphEntry } from "../types/index.js";
 import { readFile } from "../utils/file-utils.js";
@@ -12,6 +13,7 @@ export class CallGraphManager implements ICallGraphReader, ICallGraphWriter {
   constructor(
     private importResolver: IImportResolver,
     private parsers: ILanguageParser[],
+    private typeGraph?: ITypeGraphReader,
   ) {}
 
   // === ICallGraphWriter ===
@@ -249,8 +251,123 @@ export class CallGraphManager implements ICallGraphReader, ICallGraphWriter {
             if (match) call.resolvedId = match.id;
           }
         }
+
+        // Type-aware resolution for still-unresolved calls
+        if (!call.resolvedId && this.typeGraph) {
+          const resolved = this.resolveViaTypeGraph(call.target, _callerId, index);
+          if (resolved) call.resolvedId = resolved;
+        }
       }
     }
+  }
+
+  /**
+   * Resolve interface-based calls using the type graph.
+   * Pattern 1: this.field.method() — constructor injection
+   * Pattern 2: param.field.method() — function parameter injection
+   */
+  private resolveViaTypeGraph(
+    target: string,
+    callerId: string,
+    index: IFunctionIndexReader,
+  ): string | null {
+    const parts = target.split(".");
+    if (parts.length < 2 || !this.typeGraph) return null;
+
+    const callerRecord = index.getById(callerId);
+    if (!callerRecord) return null;
+
+    // Pattern 1: this.field.method() — 3+ parts starting with this/self
+    if (parts[0] === "this" || parts[0] === "self") {
+      if (parts.length < 3) return null;
+
+      // Find the caller's class name
+      const className = callerRecord.name.split(".")[0];
+      return this.resolveTypeChain(className, parts.slice(1), index);
+    }
+
+    // Pattern 2: param.field.method() — resolve via function parameter types
+    if (callerRecord.paramTypes && parts.length >= 2) {
+      const paramType = callerRecord.paramTypes.find(p => p.name === parts[0]);
+      if (paramType) {
+        return this.resolveTypeChain(paramType.type, parts.slice(1), index);
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Walk a chain of member accesses through the type graph.
+   * E.g., for chain ["vectorDb", "vectorSearch"] starting from "HybridSearchPipeline":
+   *   HybridSearchPipeline.members["vectorDb"] → "IVectorDatabase"
+   *   findImplementorMethod("IVectorDatabase", "vectorSearch") → LanceDBStore.vectorSearch
+   */
+  private resolveTypeChain(
+    startType: string,
+    chain: string[],
+    index: IFunctionIndexReader,
+  ): string | null {
+    if (!this.typeGraph || chain.length === 0) return null;
+
+    let currentType = startType;
+    // Walk intermediate fields (all but last element)
+    for (let i = 0; i < chain.length - 1; i++) {
+      const memberType = this.typeGraph.getMemberType(currentType, chain[i]);
+      if (!memberType) return null;
+      currentType = memberType;
+    }
+
+    // Last element is the method name — find it on the resolved type
+    const methodName = chain[chain.length - 1];
+    return this.findImplementorMethod(currentType, methodName, index);
+  }
+
+  /**
+   * Find a method on a type or its implementors/extenders.
+   */
+  private findImplementorMethod(
+    typeName: string,
+    methodName: string,
+    index: IFunctionIndexReader,
+  ): string | null {
+    if (!this.typeGraph) return null;
+
+    // Try direct: the type itself might be a concrete class with the method
+    const typeNode = this.typeGraph.getTypeNode(typeName);
+    if (typeNode?.filePath) {
+      const fileRecords = index.getByFile(typeNode.filePath);
+      const match = fileRecords.find(r =>
+        r.name === `${typeName}.${methodName}` || r.name.endsWith(`.${methodName}`)
+      );
+      if (match) return match.id;
+    }
+
+    // Try implementors
+    const implementors = this.typeGraph.getImplementors(typeName);
+    for (const implId of implementors) {
+      const sep = implId.indexOf("::");
+      if (sep === -1) continue;
+      const filePath = implId.slice(0, sep);
+      const implClassName = implId.slice(sep + 2);
+      const fileRecords = index.getByFile(filePath);
+      const match = fileRecords.find(r => r.name === `${implClassName}.${methodName}`);
+      if (match) return match.id;
+    }
+
+    // Try extenders (for abstract base classes)
+    const extenders = this.typeGraph.getExtenders(typeName);
+    for (const extId of extenders) {
+      const sep = extId.indexOf("::");
+      if (sep === -1) continue;
+      const filePath = extId.slice(0, sep);
+      const extClassName = extId.slice(sep + 2);
+      const fileRecords = index.getByFile(filePath);
+      const match = fileRecords.find(r => r.name === `${extClassName}.${methodName}`);
+      if (match) return match.id;
+    }
+
+    return null;
   }
 
   private buildReverseGraph(index: IFunctionIndexReader): void {

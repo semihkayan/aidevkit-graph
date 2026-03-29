@@ -67,6 +67,21 @@ function getParams(node: SyntaxNode): string {
   return params?.text || "()";
 }
 
+function extractParamTypes(node: SyntaxNode): Array<{ name: string; type: string }> | undefined {
+  const params = node.children?.find((c: SyntaxNode) => c.type === "formal_parameters");
+  if (!params) return undefined;
+  const result: Array<{ name: string; type: string }> = [];
+  for (let i = 0; i < params.childCount; i++) {
+    const param = params.children[i];
+    if (param.type !== "required_parameter" && param.type !== "optional_parameter") continue;
+    const name = param.children.find((c: SyntaxNode) => c.type === "identifier")?.text;
+    const typeAnn = param.children.find((c: SyntaxNode) => c.type === "type_annotation");
+    const typeName = typeAnn?.children.find((c: SyntaxNode) => c.type !== ":" && c.type !== "?")?.text;
+    if (name && typeName) result.push({ name, type: typeName });
+  }
+  return result.length > 0 ? result : undefined;
+}
+
 function extractFunctions(rootNode: SyntaxNode, _filePath: string): RawFunctionInfo[] {
   const results: RawFunctionInfo[] = [];
 
@@ -87,6 +102,7 @@ function extractFunctions(rootNode: SyntaxNode, _filePath: string): RawFunctionI
       visibility: isExported ? "public" : "private",
       isAsync: isAsync(node),
       docstring: getJSDoc(docNode) || undefined,
+      paramTypes: extractParamTypes(node),
     });
   }
 
@@ -111,6 +127,7 @@ function extractFunctions(rootNode: SyntaxNode, _filePath: string): RawFunctionI
         visibility: isExported ? "public" : "private",
         isAsync: isAsync(valueNode),
         docstring: getJSDoc(outerNode) || undefined,
+        paramTypes: extractParamTypes(valueNode),
       });
     }
   }
@@ -160,6 +177,7 @@ function extractFunctions(rootNode: SyntaxNode, _filePath: string): RawFunctionI
         visibility: getVisibility(method),
         isAsync: isAsync(method),
         docstring: getJSDoc(method) || undefined,
+        paramTypes: extractParamTypes(method),
       });
     }
 
@@ -175,6 +193,27 @@ function extractFunctions(rootNode: SyntaxNode, _filePath: string): RawFunctionI
       isAsync: false,
       docstring: getJSDoc(classOuterNode) || undefined,
       classInfo: { inherits: [...extendsList, ...implementsList], methods: methodNames },
+    });
+  }
+
+  // Interface declarations — extract as records so they appear in the file index
+  // and type graph can parse their member types from the file
+  const interfaceNodes = walkNodes(rootNode, ["interface_declaration"]);
+  for (const iface of interfaceNodes) {
+    const name = iface.children.find((c: SyntaxNode) => c.type === "type_identifier")?.text;
+    if (!name) continue;
+
+    const isExported = iface.parent?.type === "export_statement";
+    const outerNode = isExported ? iface.parent : iface;
+    results.push({
+      name,
+      kind: "interface",
+      signature: `interface ${name}`,
+      lineStart: outerNode.startPosition.row + 1,
+      lineEnd: iface.endPosition.row + 1,
+      visibility: isExported ? "public" : "private",
+      isAsync: false,
+      docstring: getJSDoc(outerNode) || undefined,
     });
   }
 
@@ -280,12 +319,35 @@ function extractTypeRelationships(rootNode: SyntaxNode, filePath: string): RawTy
       }
     }
 
+    // Extract constructor field types (private/readonly params become class fields)
+    const members: Array<{ name: string; type: string }> = [];
+    for (const method of methods) {
+      const methodName = method.children.find((c: SyntaxNode) => c.type === "property_identifier")?.text;
+      if (methodName !== "constructor") continue;
+      const params = method.children.find((c: SyntaxNode) => c.type === "formal_parameters");
+      if (!params) continue;
+      for (let i = 0; i < params.childCount; i++) {
+        const param = params.children[i];
+        if (param.type !== "required_parameter") continue;
+        // Only params with accessibility_modifier (private/public/protected) or readonly become fields
+        const hasAccessor = param.children.some((c: SyntaxNode) =>
+          c.type === "accessibility_modifier" || c.text === "readonly"
+        );
+        if (!hasAccessor) continue;
+        const paramName = param.children.find((c: SyntaxNode) => c.type === "identifier")?.text;
+        const typeAnn = param.children.find((c: SyntaxNode) => c.type === "type_annotation");
+        const typeName = typeAnn?.children.find((c: SyntaxNode) => c.type !== ":")?.text;
+        if (paramName && typeName) members.push({ name: paramName, type: typeName });
+      }
+    }
+
     results.push({
       className: name,
       kind: "class",
       implements: implementsList,
       extends: extendsList,
       usesTypes,
+      members: members.length > 0 ? members : undefined,
       filePath,
       lineStart: node.startPosition.row + 1,
       lineEnd: node.endPosition.row + 1,
@@ -298,12 +360,36 @@ function extractTypeRelationships(rootNode: SyntaxNode, filePath: string): RawTy
     const name = node.children.find((c: SyntaxNode) => c.type === "type_identifier")?.text;
     if (!name) continue;
 
+    // Extract interface property types
+    const members: Array<{ name: string; type: string }> = [];
+    const ifaceBody = node.children.find((c: SyntaxNode) =>
+      c.type === "interface_body" || c.type === "object_type"
+    );
+    if (ifaceBody) {
+      for (let i = 0; i < ifaceBody.childCount; i++) {
+        const child = ifaceBody.children[i];
+        if (child.type === "property_signature") {
+          const propName = child.children.find((c: SyntaxNode) => c.type === "property_identifier")?.text;
+          const typeAnn = child.children.find((c: SyntaxNode) => c.type === "type_annotation");
+          const typeName = typeAnn?.children.find((c: SyntaxNode) => c.type !== ":")?.text;
+          if (propName && typeName) members.push({ name: propName, type: typeName });
+        } else if (child.type === "method_signature") {
+          const methodName = child.children.find((c: SyntaxNode) => c.type === "property_identifier")?.text;
+          // For methods, the "type" is the return type (useful for chaining resolution)
+          const typeAnn = child.children.find((c: SyntaxNode) => c.type === "type_annotation");
+          const retType = typeAnn?.children.find((c: SyntaxNode) => c.type !== ":")?.text;
+          if (methodName && retType) members.push({ name: methodName, type: retType });
+        }
+      }
+    }
+
     results.push({
       className: name,
       kind: "interface",
       implements: [],
       extends: [],
       usesTypes: [],
+      members: members.length > 0 ? members : undefined,
       filePath,
       lineStart: node.startPosition.row + 1,
       lineEnd: node.endPosition.row + 1,

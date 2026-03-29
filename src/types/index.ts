@@ -35,6 +35,9 @@ export interface FunctionRecord {
     usesTypes: string[];         // Signature types: ["Order", "Result"]
   };
 
+  // Parameter types (for type-aware call resolution)
+  paramTypes?: Array<{ name: string; type: string }>;
+
   // Metadata
   fileHash: string;
   lastIndexedAt: number;
@@ -98,6 +101,7 @@ export interface TypeNode {
   implementors: string[];
   extenders: string[];
   usedBy: string[];
+  members: Record<string, string>;  // property/field name → type name
 }
 
 export type TypeRelationGraph = Map<string, TypeNode>;
@@ -145,6 +149,7 @@ export interface RawFunctionInfo {
   decorators?: string[];
   docstring?: string;
   classInfo?: { inherits: string[]; methods: string[] };
+  paramTypes?: Array<{ name: string; type: string }>;
 }
 
 export interface RawCallInfo {
@@ -165,6 +170,7 @@ export interface RawTypeRelationship {
   implements: string[];
   extends: string[];
   usesTypes: string[];
+  members?: Array<{ name: string; type: string }>;  // property/field → type
   filePath: string;
   lineStart: number;
   lineEnd: number;

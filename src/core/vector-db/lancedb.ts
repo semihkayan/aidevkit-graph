@@ -128,6 +128,15 @@ export class LanceDBStore implements IVectorDatabase, IFullTextSearch {
     }
   }
 
+  async dropTable(): Promise<void> {
+    if (!this.db || !this.table) return;
+    try {
+      await this.db.dropTable(this._tableName);
+      this.table = null;
+      this._ftsAvailable = false;
+    } catch { /* table may not exist */ }
+  }
+
   async close(): Promise<void> {
     // LanceDB connections don't need explicit close
   }

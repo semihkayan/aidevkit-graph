@@ -97,11 +97,12 @@ export class ReindexOrchestrator implements IReindexOrchestrator {
     const allAffectedFiles = Array.from(new Set([...changedFilePaths, ...deletedFilePaths]));
 
     for (const f of allAffectedFiles) {
-      ws.callGraphWriter.removeByFile(f, ws.index);
       ws.typeGraphWriter.removeByFile(f);
+      ws.callGraphWriter.removeByFile(f, ws.index);
     }
-    await ws.callGraphWriter.buildForFiles(changedFilePaths, ws.index, ws.projectRoot);
+    // Type graph first — call graph uses it for interface-based resolution
     await ws.typeGraphWriter.buildForFiles(changedFilePaths, ws.index, this.parsers, ws.projectRoot);
+    await ws.callGraphWriter.buildForFiles(changedFilePaths, ws.index, ws.projectRoot);
     await ws.indexWriter.saveToDisk();
     await this.saveGraphs(ws, wsPath);
 
@@ -123,8 +124,9 @@ export class ReindexOrchestrator implements IReindexOrchestrator {
   }
 
   private async rebuildGraphs(ws: WorkspaceServices, wsPath: string): Promise<void> {
-    await ws.callGraphWriter.build(ws.index, ws.projectRoot);
+    // Type graph first — call graph uses it for interface-based resolution
     await ws.typeGraphWriter.build(ws.index, this.parsers, ws.projectRoot);
+    await ws.callGraphWriter.build(ws.index, ws.projectRoot);
     await this.saveGraphs(ws, wsPath);
   }
 

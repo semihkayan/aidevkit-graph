@@ -64,6 +64,11 @@ async function main() {
         const lanceStore = new LanceDBStore();
         await lanceStore.initialize(lancePath, tableName);
 
+        // Force mode: drop old vectors to eliminate stale entries (e.g., deleted/ignored files)
+        if (force) {
+          await lanceStore.dropTable();
+        }
+
         const allIds = index.getAllFilePaths().flatMap(fp => index.getFileRecordIds(fp));
         console.log(`[${wsPath}] Embedding ${allIds.length} functions...`);
         const startEmbed = Date.now();
@@ -76,13 +81,14 @@ async function main() {
 
     // Build and save call graph + type graph
     const importResolver = new ImportResolver(parsers);
-    const callGraph = new CallGraphManager(importResolver, parsers);
     const typeGraph = new TypeGraphManager();
+    const callGraph = new CallGraphManager(importResolver, parsers, typeGraph);
 
-    console.log(`[${wsPath}] Building call graph + type graph...`);
+    console.log(`[${wsPath}] Building type graph + call graph...`);
     const startGraph = Date.now();
-    await callGraph.build(index, wsRoot);
+    // Type graph first — call graph uses it for interface-based resolution
     await typeGraph.build(index, parsers, wsRoot);
+    await callGraph.build(index, wsRoot);
 
     const graphCacheDir = wsPath === "."
       ? path.join(resolvedRoot, ".code-context")

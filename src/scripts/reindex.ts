@@ -84,11 +84,12 @@ async function main() {
 
     // Rebuild and save call graph + type graph
     const importResolver = new ImportResolver(parsers);
-    const callGraph = new CallGraphManager(importResolver, parsers);
     const typeGraph = new TypeGraphManager();
+    const callGraph = new CallGraphManager(importResolver, parsers, typeGraph);
 
-    await callGraph.build(index, wsRoot);
+    // Type graph first — call graph uses it for interface-based resolution
     await typeGraph.build(index, parsers, wsRoot);
+    await callGraph.build(index, wsRoot);
 
     const graphCacheDir = wsPath === "."
       ? path.join(resolvedRoot, ".code-context")

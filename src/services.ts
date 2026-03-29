@@ -75,10 +75,10 @@ export async function createServices(projectRoot?: string): Promise<AppContext> 
     const lanceStore = new LanceDBStore();
     const searchPipeline = new HybridSearchPipeline(lanceStore, lanceStore, merger, embedding);
 
-    // Call graph — real implementation
+    // Call graph + type graph — real implementation
     const importResolver = new ImportResolver(parsers);
-    const callGraphManager = new CallGraphManager(importResolver, parsers);
     const typeGraphManager = new TypeGraphManager();
+    const callGraphManager = new CallGraphManager(importResolver, parsers, typeGraphManager);
 
     workspaces.set(wsPath, {
       index: functionIndex,

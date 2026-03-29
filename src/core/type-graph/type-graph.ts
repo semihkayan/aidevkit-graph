@@ -50,6 +50,16 @@ export class TypeGraphManager implements ITypeGraphReader, ITypeGraphWriter {
           const node = this.ensureNode(typeName, "type_alias", "", 0, 0);
           if (!node.usedBy.includes(classId)) node.usedBy.push(classId);
         }
+
+        // members (interface properties, constructor field types)
+        if (rel.members) {
+          const node = this.graph.get(rel.className);
+          if (node) {
+            for (const m of rel.members) {
+              node.members[m.name] = m.type;
+            }
+          }
+        }
       }
 
       // Also track function-level type usages from typeRelationships on records
@@ -105,6 +115,15 @@ export class TypeGraphManager implements ITypeGraphReader, ITypeGraphWriter {
           const node = this.ensureNode(typeName, "type_alias", "", 0, 0);
           if (!node.usedBy.includes(classId)) node.usedBy.push(classId);
         }
+
+        if (rel.members) {
+          const node = this.graph.get(rel.className);
+          if (node) {
+            for (const m of rel.members) {
+              node.members[m.name] = m.type;
+            }
+          }
+        }
       }
 
       for (const rec of index.getByFile(filePath)) {
@@ -127,6 +146,7 @@ export class TypeGraphManager implements ITypeGraphReader, ITypeGraphWriter {
         node.filePath = "";
         node.lineStart = 0;
         node.lineEnd = 0;
+        node.members = {};
       }
       // Remove references FROM this file (both own nodes and references to this file's classes)
       node.implementors = node.implementors.filter(id => !id.startsWith(filePrefix));
@@ -158,6 +178,10 @@ export class TypeGraphManager implements ITypeGraphReader, ITypeGraphWriter {
 
   getUsages(typeName: string): string[] {
     return this.graph.get(typeName)?.usedBy || [];
+  }
+
+  getMemberType(typeName: string, memberName: string): string | undefined {
+    return this.graph.get(typeName)?.members[memberName];
   }
 
   getTypeChain(typeName: string): string[] {
@@ -217,7 +241,7 @@ export class TypeGraphManager implements ITypeGraphReader, ITypeGraphWriter {
   ): TypeNode {
     let node = this.graph.get(name);
     if (!node) {
-      node = { name, kind, filePath, lineStart, lineEnd, implementors: [], extenders: [], usedBy: [] };
+      node = { name, kind, filePath, lineStart, lineEnd, implementors: [], extenders: [], usedBy: [], members: {} };
       this.graph.set(name, node);
     }
     if (filePath && !node.filePath) {

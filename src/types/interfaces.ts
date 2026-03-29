@@ -122,6 +122,7 @@ export interface ITypeGraphReader {
   getExtenders(typeName: string): string[];
   getUsages(typeName: string): string[];
   getTypeChain(typeName: string): string[];
+  getMemberType(typeName: string, memberName: string): string | undefined;
   getAllTypes(): string[];
   getStats(): { types: number; relationships: number };
 }

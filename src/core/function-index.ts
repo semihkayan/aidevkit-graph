@@ -347,6 +347,7 @@ export class FunctionIndex implements IFunctionIndexReader, IFunctionIndexWriter
         extends: raw.classInfo.inherits || [],
         usesTypes: [],
       } : undefined,
+      paramTypes: raw.paramTypes,
       fileHash: hash,
       lastIndexedAt: Date.now(),
     };

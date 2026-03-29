@@ -5,7 +5,7 @@ import path from "node:path";
 import type { IFunctionIndexReader } from "../types/interfaces.js";
 import { logger } from "./logger.js";
 
-const GRAPH_VERSION = 1;
+const GRAPH_VERSION = 2;
 
 export function computeIndexFingerprint(index: IFunctionIndexReader): string {
   const stats = index.getStats();
