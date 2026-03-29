@@ -128,11 +128,12 @@ async function main() {
 
   // === Step 1: Install package globally ===
   step("1/5 Installing @aidevkit/graph...");
-  if (commandExists("graph-server")) {
+  const isGloballyInstalled = runOrNull("npm list -g @aidevkit/graph --depth=0") !== null;
+  if (isGloballyInstalled) {
     ok("Already installed");
   } else {
-    const result = runOrNull("npm install -g @aidevkit/graph", { stdio: "inherit" });
-    if (commandExists("graph-server")) {
+    runOrNull("npm install -g @aidevkit/graph", { stdio: "inherit" });
+    if (runOrNull("npm list -g @aidevkit/graph --depth=0") !== null) {
       ok("Installed");
     } else {
       fail("Installation failed. Try manually: npm install -g @aidevkit/graph");
