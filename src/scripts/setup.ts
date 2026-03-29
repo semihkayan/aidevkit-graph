@@ -17,6 +17,7 @@ function fail(msg: string) { console.error(`  ✗ ${msg}`); }
 function step(msg: string) { console.log(`\n> ${msg}`); }
 
 function commandExists(cmd: string): boolean {
+  if (!/^[\w.@/-]+$/.test(cmd)) return false;
   try {
     const flag = os.platform() === "win32" ? "where" : "which";
     execSync(`${flag} ${cmd}`, { stdio: "ignore" });

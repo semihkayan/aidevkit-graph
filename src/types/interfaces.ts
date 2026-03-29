@@ -196,6 +196,7 @@ export interface AppContext {
   readonly embeddingAvailable: boolean;
   readonly parsers: ILanguageParser[];
   readonly watcher: IFileWatcher;
+  ready: boolean;
   shutdown(): Promise<void>;
 }
 

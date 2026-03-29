@@ -154,6 +154,7 @@ export async function createServices(projectRoot?: string): Promise<AppContext> 
     embeddingAvailable: await embedding.isAvailable(),
     parsers,
     watcher,
+    ready: false,
     async shutdown() {
       logger.info("Shutting down...");
       watcher.stop();

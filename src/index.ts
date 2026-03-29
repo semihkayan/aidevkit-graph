@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import path from "node:path";
 import { createServices } from "./services.js";
+import { reembedFunctions } from "./core/reembed.js";
 import { logger } from "./utils/logger.js";
 
 // Schemas
@@ -112,7 +113,6 @@ async function main() {
     if (services.embeddingAvailable && vectorCount === 0) {
       logger.info({ workspace: wsPath }, "Embedding all functions...");
       const allIds = ws.index.getAllFilePaths().flatMap(fp => ws.index.getFileRecordIds(fp));
-      const { reembedFunctions } = await import("./core/reembed.js");
       await reembedFunctions(allIds, ws.index, services.embedding, ws.vectorDb, services.config);
       const newCount = await ws.vectorDb.countRows();
       logger.info({ workspace: wsPath, embedded: newCount }, "Embedding complete");
@@ -128,7 +128,8 @@ async function main() {
 
   // Start file watcher — auto-reindex on file changes
   services.watcher.start();
-  logger.info("File watcher started. Initialization complete.");
+  services.ready = true;
+  logger.info("Initialization complete.");
 }
 
 main().catch((err) => {

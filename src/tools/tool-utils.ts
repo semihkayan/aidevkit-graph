@@ -1,10 +1,20 @@
 import type { AppContext, WorkspaceServices } from "../types/interfaces.js";
 
+export function checkReady(ctx: AppContext): ReturnType<typeof errorResponse> | null {
+  if (!ctx.ready) {
+    return errorResponse("NOT_READY", "Index is still initializing. Please try again in a few seconds.");
+  }
+  return null;
+}
+
 // Safely resolve workspace — returns MCP error response instead of throwing
 export function resolveWorkspaceOrError(
   ctx: AppContext,
   workspace?: string
 ): { ws: WorkspaceServices } | { error: ReturnType<typeof errorResponse> } {
+  const notReady = checkReady(ctx);
+  if (notReady) return { error: notReady };
+
   try {
     const ws = ctx.resolveWorkspace(workspace);
     return { ws };
