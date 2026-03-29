@@ -89,6 +89,12 @@ export async function createServices(projectRoot?: string): Promise<AppContext> 
       await ws.typeGraphWriter.build(ws.index, parsers, ws.projectRoot);
       await ws.indexWriter.saveToDisk();
 
+      const graphCacheDir = wsPath === "."
+        ? path.join(config.projectRoot, ".code-context")
+        : path.join(config.projectRoot, ".code-context", wsPath);
+      await ws.callGraphWriter.saveToDisk(graphCacheDir, ws.index);
+      await ws.typeGraphWriter.saveToDisk(graphCacheDir, ws.index);
+
       logger.info({ workspace: wsPath, functions: changedIds.length, files: files.length }, "Watcher reindex complete");
     }
   });
@@ -161,6 +167,11 @@ export async function createServices(projectRoot?: string): Promise<AppContext> 
       for (const [wsPath, ws] of workspaces) {
         try {
           await ws.indexWriter.saveToDisk();
+          const graphCacheDir = wsPath === "."
+            ? path.join(config.projectRoot, ".code-context")
+            : path.join(config.projectRoot, ".code-context", wsPath);
+          await ws.callGraphWriter.saveToDisk(graphCacheDir, ws.index);
+          await ws.typeGraphWriter.saveToDisk(graphCacheDir, ws.index);
           await ws.vectorDb.close?.();
         } catch (err) {
           logger.error({ workspace: wsPath, err }, "Failed to save on shutdown");

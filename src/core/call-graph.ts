@@ -3,6 +3,7 @@ import type {
 } from "../types/interfaces.js";
 import type { CallGraph, CallGraphEntry } from "../types/index.js";
 import { readFile } from "../utils/file-utils.js";
+import { computeIndexFingerprint, saveGraphJson, loadGraphJson } from "../utils/graph-persistence.js";
 import path from "node:path";
 
 export class CallGraphManager implements ICallGraphReader, ICallGraphWriter {
@@ -150,6 +151,19 @@ export class CallGraphManager implements ICallGraphReader, ICallGraphWriter {
       resolvedEdges += entry.calls.filter(c => c.resolvedId).length;
     }
     return { nodes: this.graph.size, edges: resolvedEdges, totalEdges, cycles: 0 } as any;
+  }
+
+  async saveToDisk(cacheDir: string, index: IFunctionIndexReader): Promise<void> {
+    const fp = computeIndexFingerprint(index);
+    await saveGraphJson(path.join(cacheDir, "call-graph.json"), fp, this.graph);
+  }
+
+  async loadFromDisk(cacheDir: string, index: IFunctionIndexReader): Promise<boolean> {
+    const fp = computeIndexFingerprint(index);
+    const loaded = await loadGraphJson(path.join(cacheDir, "call-graph.json"), fp);
+    if (!loaded) return false;
+    this.graph = loaded as CallGraph;
+    return true;
   }
 
   // === Private ===

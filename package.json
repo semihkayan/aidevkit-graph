@@ -1,6 +1,6 @@
 {
   "name": "@aidevkit/graph",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Codebase graph analysis for AI agents — AST + call graph + type graph + hybrid semantic search via MCP",
   "type": "module",
   "engines": {
@@ -83,5 +83,14 @@
     "vitest": "^3.0.0",
     "eslint": "^9.0.0",
     "@types/node": "^22.0.0"
+  },
+  "overrides": {
+    "tree-sitter-python": { "tree-sitter": "$tree-sitter" },
+    "tree-sitter-typescript": { "tree-sitter": "$tree-sitter" },
+    "tree-sitter-javascript": { "tree-sitter": "$tree-sitter" },
+    "tree-sitter-go": { "tree-sitter": "$tree-sitter" },
+    "tree-sitter-rust": { "tree-sitter": "$tree-sitter" },
+    "tree-sitter-java": { "tree-sitter": "$tree-sitter" },
+    "tree-sitter-c-sharp": { "tree-sitter": "$tree-sitter" }
   }
 }

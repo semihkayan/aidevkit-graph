@@ -100,6 +100,12 @@ async function main() {
       logger.info({ workspace: wsPath, ...newStats }, "Index built");
     } else {
       logger.info({ workspace: wsPath, ...stats }, "Index loaded from cache");
+      // Check for files changed while server was offline
+      const staleIds = await ws.indexWriter.refreshStale(ws.projectRoot);
+      if (staleIds.length > 0) {
+        await ws.indexWriter.saveToDisk();
+        logger.info({ workspace: wsPath, updated: staleIds.length }, "Stale files refreshed");
+      }
     }
 
     // Initialize vector DB
@@ -118,12 +124,27 @@ async function main() {
       logger.info({ workspace: wsPath, embedded: newCount }, "Embedding complete");
     }
 
-    // Build call graph + type graph
-    await ws.callGraphWriter.build(ws.index, ws.projectRoot);
-    await ws.typeGraphWriter.build(ws.index, services.parsers, ws.projectRoot);
+    // Load or build call graph + type graph
+    const graphCacheDir = wsPath === "."
+      ? path.join(services.config.projectRoot, ".code-context")
+      : path.join(services.config.projectRoot, ".code-context", wsPath);
+
+    const cgLoaded = await ws.callGraphWriter.loadFromDisk(graphCacheDir, ws.index);
+    if (!cgLoaded) {
+      await ws.callGraphWriter.build(ws.index, ws.projectRoot);
+      await ws.callGraphWriter.saveToDisk(graphCacheDir, ws.index);
+    }
+
+    const tgLoaded = await ws.typeGraphWriter.loadFromDisk(graphCacheDir, ws.index);
+    if (!tgLoaded) {
+      await ws.typeGraphWriter.build(ws.index, services.parsers, ws.projectRoot);
+      await ws.typeGraphWriter.saveToDisk(graphCacheDir, ws.index);
+    }
+
     const cgStats = ws.callGraph.getStats();
     const tgStats = ws.typeGraph.getStats();
-    logger.info({ workspace: wsPath, ...cgStats, ...tgStats }, "Call graph + type graph built");
+    logger.info({ workspace: wsPath, ...cgStats, ...tgStats, fromCache: cgLoaded && tgLoaded },
+      cgLoaded && tgLoaded ? "Graphs loaded from cache" : "Graphs built");
   }
 
   // Start file watcher — auto-reindex on file changes

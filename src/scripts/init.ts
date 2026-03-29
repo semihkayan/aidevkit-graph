@@ -11,6 +11,9 @@ import { OllamaEmbeddingProvider } from "../core/embedders/ollama.js";
 import { LanceDBStore } from "../core/vector-db/lancedb.js";
 import { reembedFunctions } from "../core/reembed.js";
 import { detectWorkspaces } from "../core/workspace-detector.js";
+import { ImportResolver } from "../core/import-resolver.js";
+import { CallGraphManager } from "../core/call-graph.js";
+import { TypeGraphManager } from "../core/type-graph/type-graph.js";
 
 async function main() {
   const args = process.argv.slice(2);
@@ -70,6 +73,26 @@ async function main() {
         console.log(`[${wsPath}] Ollama not available. Skipping embedding. Run: ollama serve && ollama pull ${config.embedding.model}`);
       }
     }
+
+    // Build and save call graph + type graph
+    const importResolver = new ImportResolver(parsers);
+    const callGraph = new CallGraphManager(importResolver, parsers);
+    const typeGraph = new TypeGraphManager();
+
+    console.log(`[${wsPath}] Building call graph + type graph...`);
+    const startGraph = Date.now();
+    await callGraph.build(index, wsRoot);
+    await typeGraph.build(index, parsers, wsRoot);
+
+    const graphCacheDir = wsPath === "."
+      ? path.join(resolvedRoot, ".code-context")
+      : path.join(resolvedRoot, ".code-context", wsPath);
+    await callGraph.saveToDisk(graphCacheDir, index);
+    await typeGraph.saveToDisk(graphCacheDir, index);
+
+    const cgStats = callGraph.getStats();
+    const tgStats = typeGraph.getStats();
+    console.log(`[${wsPath}] Graphs: ${cgStats.nodes} nodes, ${cgStats.edges} edges, ${tgStats.types} types (${Date.now() - startGraph}ms)`);
 
     console.log();
   }

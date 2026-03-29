@@ -109,6 +109,8 @@ export interface ICallGraphReader {
 export interface ICallGraphWriter {
   build(index: IFunctionIndexReader, projectRoot: string): Promise<CallGraph>;
   removeByFile(filePath: string, index: IFunctionIndexReader): void;
+  saveToDisk(cacheDir: string, index: IFunctionIndexReader): Promise<void>;
+  loadFromDisk(cacheDir: string, index: IFunctionIndexReader): Promise<boolean>;
 }
 
 // === Type Graph ===
@@ -126,6 +128,8 @@ export interface ITypeGraphReader {
 export interface ITypeGraphWriter {
   build(index: IFunctionIndexReader, parsers: ILanguageParser[], projectRoot: string): Promise<TypeRelationGraph>;
   removeByFile(filePath: string): void;
+  saveToDisk(cacheDir: string, index: IFunctionIndexReader): Promise<void>;
+  loadFromDisk(cacheDir: string, index: IFunctionIndexReader): Promise<boolean>;
 }
 
 // === Language Parser ===

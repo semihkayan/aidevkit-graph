@@ -1,7 +1,0 @@
-{
-  "mcpServers": {
-    "aidevkit": {
-      "command": "graph-server"
-    }
-  }
-}
