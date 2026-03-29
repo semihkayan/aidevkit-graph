@@ -59,7 +59,7 @@ ollama pull qwen3-embedding:0.6b
 graph-init
 ```
 
-Add to Claude Code global config (`~/.claude/settings.json`):
+Add `.mcp.json` to your project root (or run `npx @aidevkit/graph` which does this automatically):
 
 ```json
 {
