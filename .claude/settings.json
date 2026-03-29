@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "aidevkit": {
-      "command": "/opt/homebrew/opt/node@22/bin/node",
-      "args": ["/opt/homebrew/bin/graph-server"]
-    }
-  }
-}

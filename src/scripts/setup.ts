@@ -207,34 +207,25 @@ async function main() {
 
   // === Step 4: Configure Claude Code ===
   step("4/5 Configuring Claude Code...");
-  const claudeProjectDir = path.join(cwd, ".claude");
-  const projectSettingsPath = path.join(claudeProjectDir, "settings.json");
+  const mcpConfigPath = path.join(cwd, ".mcp.json");
 
-  if (!existsSync(claudeProjectDir)) mkdirSync(claudeProjectDir, { recursive: true });
-
-  let projectSettings: Record<string, any> = {};
-  if (existsSync(projectSettingsPath)) {
-    try { projectSettings = JSON.parse(readFileSync(projectSettingsPath, "utf-8")); } catch { projectSettings = {}; }
+  let mcpConfig: Record<string, any> = {};
+  if (existsSync(mcpConfigPath)) {
+    try { mcpConfig = JSON.parse(readFileSync(mcpConfigPath, "utf-8")); } catch { mcpConfig = {}; }
   }
 
-  if (projectSettings.mcpServers?.aidevkit) {
+  if (mcpConfig.mcpServers?.aidevkit) {
     ok("Already configured");
   } else {
-    if (typeof projectSettings.mcpServers !== "object" || projectSettings.mcpServers === null) {
-      projectSettings.mcpServers = {};
+    if (typeof mcpConfig.mcpServers !== "object" || mcpConfig.mcpServers === null) {
+      mcpConfig.mcpServers = {};
     }
-    // Use absolute paths — Claude Code may not have PATH access
-    const nodePath = runOrNull(os.platform() === "win32" ? "where node" : "which node") || "node";
-    const serverPath = runOrNull(os.platform() === "win32" ? "where graph-server" : "which graph-server") || "graph-server";
-    projectSettings.mcpServers.aidevkit = {
-      command: nodePath,
-      args: [serverPath],
-    };
-    const tmpPath = projectSettingsPath + ".tmp";
-    writeFileSync(tmpPath, JSON.stringify(projectSettings, null, 2));
+    mcpConfig.mcpServers.aidevkit = { command: "graph-server" };
+    const tmpPath = mcpConfigPath + ".tmp";
+    writeFileSync(tmpPath, JSON.stringify(mcpConfig, null, 2));
     const { renameSync } = await import("node:fs");
-    renameSync(tmpPath, projectSettingsPath);
-    ok("Added to .claude/settings.json");
+    renameSync(tmpPath, mcpConfigPath);
+    ok("Added to .mcp.json");
   }
 
   // === Step 5: Index project ===
