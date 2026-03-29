@@ -1,6 +1,6 @@
 {
   "name": "@aidevkit/graph",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Codebase graph analysis for AI agents — AST + call graph + type graph + hybrid semantic search via MCP",
   "type": "module",
   "engines": {

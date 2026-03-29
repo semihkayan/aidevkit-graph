@@ -28,7 +28,7 @@ function commandExists(cmd: string): boolean {
 
 function runOrNull(cmd: string, opts?: { stdio?: "inherit" | "ignore" | "pipe" }): string | null {
   try {
-    return execSync(cmd, { encoding: "utf-8", stdio: opts?.stdio || "pipe", timeout: 60_000 }).trim();
+    return execSync(cmd, { encoding: "utf-8", stdio: opts?.stdio || "pipe", timeout: 300_000 }).trim();
   } catch { return null; }
 }
 
@@ -201,7 +201,7 @@ async function main() {
         ok(`${OLLAMA_MODEL} ready`);
       } else {
         log(`Pulling ${OLLAMA_MODEL}...`);
-        runOrNull(`ollama pull ${OLLAMA_MODEL}`, { stdio: "inherit" });
+        try { execSync(`ollama pull ${OLLAMA_MODEL}`, { stdio: "inherit" }); } catch { /* handled below */ }
         const modelsAfter = runOrNull("ollama list") || "";
         if (modelsAfter.includes(OLLAMA_MODEL.split(":")[0])) {
           ok("Model downloaded");
