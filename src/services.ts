@@ -77,16 +77,16 @@ export async function createServices(projectRoot?: string): Promise<AppContext> 
         logger.warn({ err }, "Watcher re-embed failed");
       }
 
-      // Rebuild call graph + type graph for affected files
-      const affectedFiles = new Set(
+      // Incremental rebuild call graph + type graph for affected files only
+      const affectedFiles = Array.from(new Set(
         changedIds.map(id => ws.index.getById(id)?.filePath).filter(Boolean) as string[]
-      );
+      ));
       for (const f of affectedFiles) {
         ws.callGraphWriter.removeByFile(f, ws.index);
         ws.typeGraphWriter.removeByFile(f);
       }
-      await ws.callGraphWriter.build(ws.index, ws.projectRoot);
-      await ws.typeGraphWriter.build(ws.index, parsers, ws.projectRoot);
+      await ws.callGraphWriter.buildForFiles(affectedFiles, ws.index, ws.projectRoot);
+      await ws.typeGraphWriter.buildForFiles(affectedFiles, ws.index, parsers, ws.projectRoot);
       await ws.indexWriter.saveToDisk();
 
       const graphCacheDir = wsPath === "."

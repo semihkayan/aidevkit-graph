@@ -62,6 +62,41 @@ export class CallGraphManager implements ICallGraphReader, ICallGraphWriter {
     return this.graph;
   }
 
+  async buildForFiles(files: string[], index: IFunctionIndexReader, projectRoot: string): Promise<void> {
+    for (const filePath of files) {
+      const parser = this.parsers.find(p => p.canParse(filePath));
+      if (!parser) continue;
+
+      const absPath = path.join(projectRoot, filePath);
+      let source: string;
+      try {
+        source = await readFile(absPath);
+      } catch {
+        continue;
+      }
+
+      const imports = this.importResolver.resolveImports(source, filePath, projectRoot);
+      const recordIds = index.getFileRecordIds(filePath);
+
+      for (const recordId of recordIds) {
+        const record = index.getById(recordId);
+        if (!record || record.kind === "class") continue;
+
+        const rawCalls = parser.parseCalls(source, record.lineStart, record.lineEnd);
+        const resolvedCalls = rawCalls.map(call => {
+          const target = call.objectName ? `${call.objectName}.${call.name}` : call.name;
+          const resolvedFile = this.resolveCallTarget(call, imports, filePath);
+          return { target, resolvedFile, resolvedId: null as string | null, line: call.line };
+        });
+
+        this.graph.set(recordId, { calls: resolvedCalls, calledBy: [] });
+      }
+    }
+
+    this.resolveTargetIds(index);
+    this.buildReverseGraph(index);
+  }
+
   removeByFile(filePath: string, index: IFunctionIndexReader): void {
     const recordIds = index.getByFile(filePath).map(r => r.id);
     for (const id of recordIds) {

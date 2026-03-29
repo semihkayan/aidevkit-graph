@@ -254,12 +254,14 @@ async function main() {
   console.log("  Try: 'find the authentication code'");
   console.log("  Or:  'what calls this function?'\n");
 
-  // .gitignore reminder
+  // .gitignore — add .code-context/ if .gitignore exists
   const gitignorePath = path.join(cwd, ".gitignore");
   if (existsSync(gitignorePath)) {
     const content = readFileSync(gitignorePath, "utf-8");
     if (!content.includes(".code-context")) {
-      warn("Add to .gitignore: .code-context/");
+      const separator = content.endsWith("\n") ? "" : "\n";
+      writeFileSync(gitignorePath, content + separator + ".code-context/\n");
+      ok("Added .code-context/ to .gitignore");
     }
   }
 }

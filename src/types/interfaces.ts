@@ -108,6 +108,7 @@ export interface ICallGraphReader {
 
 export interface ICallGraphWriter {
   build(index: IFunctionIndexReader, projectRoot: string): Promise<CallGraph>;
+  buildForFiles(files: string[], index: IFunctionIndexReader, projectRoot: string): Promise<void>;
   removeByFile(filePath: string, index: IFunctionIndexReader): void;
   saveToDisk(cacheDir: string, index: IFunctionIndexReader): Promise<void>;
   loadFromDisk(cacheDir: string, index: IFunctionIndexReader): Promise<boolean>;
@@ -127,6 +128,7 @@ export interface ITypeGraphReader {
 
 export interface ITypeGraphWriter {
   build(index: IFunctionIndexReader, parsers: ILanguageParser[], projectRoot: string): Promise<TypeRelationGraph>;
+  buildForFiles(files: string[], index: IFunctionIndexReader, parsers: ILanguageParser[], projectRoot: string): Promise<void>;
   removeByFile(filePath: string): void;
   saveToDisk(cacheDir: string, index: IFunctionIndexReader): Promise<void>;
   loadFromDisk(cacheDir: string, index: IFunctionIndexReader): Promise<boolean>;

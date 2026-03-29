@@ -66,6 +66,53 @@ export class TypeGraphManager implements ITypeGraphReader, ITypeGraphWriter {
     return this.graph;
   }
 
+  async buildForFiles(
+    files: string[],
+    index: IFunctionIndexReader,
+    parsers: ILanguageParser[],
+    projectRoot: string,
+  ): Promise<void> {
+    for (const filePath of files) {
+      const parser = parsers.find(p => p.canParse(filePath));
+      if (!parser) continue;
+
+      const absPath = path.join(projectRoot, filePath);
+      let source: string;
+      try {
+        source = await readFile(absPath);
+      } catch { continue; }
+
+      const typeRels = parser.parseTypeRelationships(source, filePath);
+
+      for (const rel of typeRels) {
+        this.ensureNode(rel.className, rel.kind, filePath, rel.lineStart, rel.lineEnd);
+        const classId = `${filePath}::${rel.className}`;
+
+        for (const iface of rel.implements) {
+          const node = this.ensureNode(iface, "interface", "", 0, 0);
+          if (!node.implementors.includes(classId)) node.implementors.push(classId);
+        }
+        for (const base of rel.extends) {
+          const node = this.ensureNode(base, "class", "", 0, 0);
+          if (!node.extenders.includes(classId)) node.extenders.push(classId);
+        }
+        for (const typeName of rel.usesTypes) {
+          const node = this.ensureNode(typeName, "type_alias", "", 0, 0);
+          if (!node.usedBy.includes(classId)) node.usedBy.push(classId);
+        }
+      }
+
+      for (const rec of index.getByFile(filePath)) {
+        if (rec.typeRelationships) {
+          for (const typeName of rec.typeRelationships.usesTypes) {
+            const node = this.ensureNode(typeName, "type_alias", "", 0, 0);
+            if (!node.usedBy.includes(rec.id)) node.usedBy.push(rec.id);
+          }
+        }
+      }
+    }
+  }
+
   removeByFile(filePath: string): void {
     const filePrefix = `${filePath}::`;
     for (const [name, node] of this.graph) {
