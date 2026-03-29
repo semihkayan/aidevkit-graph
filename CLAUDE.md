@@ -2,7 +2,9 @@
 
 ## What this project is
 
-This MCP server lets AI agents understand a codebase without reading every file into context. It locally builds an AST index, call graph, type graph, and vector search index, then exposes 13 tools the agent can query: find functions by meaning, trace call chains, assess refactoring risk — all returning just the information the agent needs. The agent pulls targeted context instead of dumping entire files, so token cost drops and answer quality rises.
+MCP server that gives AI agents cheap, precise code understanding. Instead of dumping entire files into context, the agent queries local indexes (AST, call graph, type graph, vector search) and gets back only what it needs. All indexing is local and live — file watcher keeps everything current as code changes.
+
+Goal: agents work with code at lower token cost and higher quality. Every feature serves this.
 
 ## Build & Run
 
