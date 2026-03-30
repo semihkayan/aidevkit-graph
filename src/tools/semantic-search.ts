@@ -117,9 +117,10 @@ export async function handleSemanticSearch(
 
   // Re-sort by adjusted score and drop results that fell below threshold
   enriched.sort((a, b) => b.score - a.score);
+  const finalResults = enriched.filter(r => r.score >= MIN_SCORE);
 
   // Clean up: remove internal record reference and round scores
-  for (const r of enriched) {
+  for (const r of finalResults) {
     delete (r as any).record;
     r.score = Math.round(r.score * 1000) / 1000;
   }
@@ -135,7 +136,7 @@ export async function handleSemanticSearch(
   else searchMode = "degraded";
 
   const response: Record<string, unknown> = {
-    results: enriched,
+    results: finalResults,
     total_indexed: stats.functions + stats.classes,
     search_mode: searchMode,
   };

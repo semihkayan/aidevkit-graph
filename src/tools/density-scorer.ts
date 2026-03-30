@@ -130,6 +130,32 @@ function isConstructor(record: FunctionRecord): boolean {
   return name === "constructor" || name === "__init__";
 }
 
+// === Accessor Detection (language-agnostic structural heuristic) ===
+
+const NON_ACCESSOR_KINDS = new Set(["class", "interface", "enum", "struct", "record"]);
+
+/**
+ * Detect getter/setter methods using purely structural signals:
+ * - Body ≤ 4 lines (getters/setters are 1-3 lines)
+ * - 0-1 params (getters=0, setters=1; business methods have 2+)
+ * - 0 resolved outgoing calls (accessors don't call project code)
+ */
+export function isAccessor(record: FunctionRecord, callEntry: CallGraphEntry | undefined): boolean {
+  if (NON_ACCESSOR_KINDS.has(record.kind)) return false;
+  if (isConstructor(record)) return false;
+
+  const bodyLines = record.lineEnd - record.lineStart + 1;
+  if (bodyLines > 4) return false;
+
+  const paramCount = record.paramTypes?.length ?? countParamsFromSignature(record.signature);
+  if (paramCount > 1) return false;
+
+  const resolvedCalls = callEntry?.calls.filter(c => c.resolvedId).length ?? 0;
+  if (resolvedCalls > 0) return false;
+
+  return true;
+}
+
 // === Test File Detection (orthogonal to density) ===
 
 /**
@@ -153,7 +179,7 @@ export function applyDensityAdjustment(
   const densityConfig = config.search.density;
   if (!densityConfig.enabled) return;
 
-  const { floor, ceiling, testFilePenalty, weights } = densityConfig;
+  const { floor, ceiling, accessorPenalty, constructorPenalty, testFilePenalty, weights } = densityConfig;
   const range = ceiling - floor;
 
   for (const r of results) {
@@ -169,10 +195,14 @@ export function applyDensityAdjustment(
 
     // Orthogonal penalties for low-information-density categories
 
+    // Accessors: short body, few params, no project calls → pure data access, no behavior.
+    if (isAccessor(r.record, callEntry)) {
+      r.score *= accessorPenalty;
+    }
+
     // Constructors: many params → high density score, but behavior is just assignment.
-    // Agent wants the service's methods, not its dependency list.
     if (isConstructor(r.record)) {
-      r.score *= 0.80;
+      r.score *= constructorPenalty;
     }
 
     // Test files: large body → high density score, but shows verification not behavior.

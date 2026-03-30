@@ -274,6 +274,8 @@ export interface Config {
       enabled: boolean;
       floor: number;
       ceiling: number;
+      accessorPenalty: number;
+      constructorPenalty: number;
       testFilePenalty: number;
       weights: {
         bodySize: number;

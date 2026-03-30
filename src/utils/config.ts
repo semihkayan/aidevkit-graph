@@ -50,7 +50,9 @@ const ConfigSchema = z.object({
       enabled: z.boolean().default(true),
       floor: z.number().min(0).max(1).default(0.65),
       ceiling: z.number().min(0.5).max(2).default(1.05),
-      testFilePenalty: z.number().min(0).max(1).default(0.90),
+      accessorPenalty: z.number().min(0).max(1).default(0.55),
+      constructorPenalty: z.number().min(0).max(1).default(0.60),
+      testFilePenalty: z.number().min(0).max(1).default(0.75),
       weights: z.object({
         bodySize: z.number().default(0.35),
         docstring: z.number().default(0.10),
