@@ -2,6 +2,37 @@ import type { IFunctionIndexReader, IEmbeddingProvider, IVectorDatabase, Config 
 import type { FunctionRecord, VectorRow } from "../types/index.js";
 import { buildChunk } from "./chunk-builder.js";
 
+/**
+ * Pre-compute class docstring summaries for method records.
+ * Methods get their parent class's summary injected into their chunk,
+ * giving the embedding model class-level domain context.
+ */
+function resolveClassContexts(
+  records: FunctionRecord[],
+  index: IFunctionIndexReader,
+): Map<string, string> {
+  const result = new Map<string, string>();
+  const cache = new Map<string, string | null>();
+
+  for (const record of records) {
+    if (record.kind !== "method") continue;
+
+    const className = record.name.split(".")[0];
+    const cacheKey = `${record.filePath}::${className}`;
+
+    if (!cache.has(cacheKey)) {
+      const siblings = index.getByFile(record.filePath);
+      const classRecord = siblings.find(r => r.kind === "class" && r.name === className);
+      cache.set(cacheKey, classRecord?.docstring?.summary || null);
+    }
+
+    const summary = cache.get(cacheKey);
+    if (summary) result.set(record.id, summary);
+  }
+
+  return result;
+}
+
 export async function reembedFunctions(
   changedIds: string[],
   index: IFunctionIndexReader,
@@ -19,7 +50,12 @@ export async function reembedFunctions(
     expandCamelCase: config.search.expandCamelCase,
     maxChunkTokens: config.indexing.maxChunkTokens,
   };
-  const chunks = records.map(r => buildChunk(r, chunkConfig));
+
+  // Resolve class context for methods, then build chunks
+  const classContextMap = resolveClassContexts(records, index);
+  const chunks = records.map(r =>
+    buildChunk(r, chunkConfig, classContextMap.get(r.id) ?? null)
+  );
 
   // Batch embed — skip failed batches instead of inserting zero vectors
   const batchSize = config.embedding.batchSize;

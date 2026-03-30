@@ -9,8 +9,15 @@ export interface ChunkConfig {
 /**
  * Build a text chunk for embedding. Every token should carry semantic meaning.
  * No labels, no file paths, no redundancy — just identity, signature, and content.
+ *
+ * @param classContext - Parent class docstring summary for method records.
+ *   Caller resolves this from the index; chunk-builder stays index-agnostic.
  */
-export function buildChunk(record: FunctionRecord, config: ChunkConfig): string {
+export function buildChunk(
+  record: FunctionRecord,
+  config: ChunkConfig,
+  classContext?: string | null,
+): string {
   const expand = config.expandCamelCase ? expandIdentifiers : (s: string) => s;
   const parts: string[] = [];
 
@@ -28,8 +35,11 @@ export function buildChunk(record: FunctionRecord, config: ChunkConfig): string 
   } else if (record.kind === "interface") {
     parts.push(`interface ${expand(record.name)}`);
   } else {
-    // Function/method: expanded qualified name + raw signature
+    // Function/method: expanded qualified name + class context + raw signature
     parts.push(expand(record.name));
+    if (classContext && record.kind === "method") {
+      parts.push(classContext);
+    }
     parts.push(record.signature);
   }
 
