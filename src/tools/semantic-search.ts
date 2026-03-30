@@ -8,33 +8,44 @@ import { applyDensityAdjustment } from "./density-scorer.js";
  * Gives the agent enough context to triage search results without opening source.
  */
 function buildAutoSummary(record: FunctionRecord): string {
-  const parts: string[] = [];
+  // Class: show inheritance and method names so agent sees what the class offers
+  if (record.kind === "class") {
+    const methods = (record.classInfo?.methods || [])
+      .filter(m => m !== "constructor" && m !== "__init__");
+    const inheritsInfo = record.classInfo?.inherits?.length
+      ? ` extends ${record.classInfo.inherits.join(", ")}` : "";
+    const shown = methods.slice(0, 5).join(", ");
+    const more = methods.length > 5 ? `, +${methods.length - 5} more` : "";
+    return methods.length > 0
+      ? `Class${inheritsInfo}, ${methods.length} methods: ${shown}${more}`
+      : `Class${inheritsInfo}`;
+  }
 
-  // Kind + async indicator
-  if (record.kind === "class") return `Class with ${record.classInfo?.methods.length ?? 0} methods`;
   if (record.kind === "interface") return `Interface declaration`;
 
-  // For functions/methods, describe from signature
+  // Method/function: body size is the most informative signal for undocumented code
+  const parts: string[] = [];
+  const bodyLines = record.lineEnd - record.lineStart + 1;
+  if (bodyLines > 1) parts.push(`${bodyLines}-line`);
+  parts.push(record.kind);
   if (record.isAsync) parts.push("async");
 
-  // Extract param count and return type from signature
+  // Param count
   const paramMatch = record.signature.match(/\(([^)]*)\)/);
   const params = paramMatch?.[1]?.trim();
   if (params) {
     const paramCount = params.split(",").filter(Boolean).length;
-    parts.push(`${paramCount} param${paramCount !== 1 ? "s" : ""}`);
+    if (paramCount > 0) parts.push(`${paramCount} param${paramCount !== 1 ? "s" : ""}`);
   }
 
   // Return type
   const retMatch = record.signature.match(/\)\s*(?:->|:)\s*(.+)$/);
-  if (retMatch) {
-    parts.push(`→ ${retMatch[1].trim()}`);
-  }
+  if (retMatch) parts.push(`→ ${retMatch[1].trim()}`);
 
   // Visibility
   if (record.visibility === "private") parts.push("(private)");
 
-  return parts.join(", ") || record.kind;
+  return parts.join(", ");
 }
 
 export async function handleSemanticSearch(
