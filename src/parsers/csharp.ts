@@ -28,6 +28,15 @@ function getXmlDoc(node: SyntaxNode): string | null {
     .trim();
 }
 
+function getAttributes(node: SyntaxNode): string[] | undefined {
+  const attrs = node.children
+    .filter((c: SyntaxNode) => c.type === "attribute_list")
+    .flatMap((al: SyntaxNode) => al.children
+      .filter((c: SyntaxNode) => c.type === "attribute")
+      .map((c: SyntaxNode) => `@${c.text}`));
+  return attrs.length > 0 ? attrs : undefined;
+}
+
 function getVisibility(node: SyntaxNode): "public" | "private" | "protected" {
   for (let i = 0; i < node.childCount; i++) {
     const text = node.children[i].text;
@@ -58,6 +67,7 @@ function extractFunctions(rootNode: SyntaxNode, _filePath: string): RawFunctionI
       lineStart: node.startPosition.row + 1, lineEnd: node.endPosition.row + 1,
       visibility: getVisibility(node), isAsync,
       docstring: getXmlDoc(node) || undefined,
+      decorators: getAttributes(node),
     });
   }
 
@@ -72,6 +82,7 @@ function extractFunctions(rootNode: SyntaxNode, _filePath: string): RawFunctionI
       lineStart: node.startPosition.row + 1, lineEnd: node.endPosition.row + 1,
       visibility: getVisibility(node), isAsync: false,
       docstring: getXmlDoc(node) || undefined,
+      decorators: getAttributes(node),
     });
   }
 
@@ -96,6 +107,7 @@ function extractFunctions(rootNode: SyntaxNode, _filePath: string): RawFunctionI
       lineStart: node.startPosition.row + 1, lineEnd: node.endPosition.row + 1,
       visibility: getVisibility(node), isAsync: false,
       docstring: getXmlDoc(node) || undefined,
+      decorators: getAttributes(node),
       classInfo: { inherits, methods },
     });
   }

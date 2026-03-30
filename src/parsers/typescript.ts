@@ -6,6 +6,27 @@ import { walkNodes, findParent, type SyntaxNode } from "./ast-utils.js";
 
 
 
+function getTsDecorators(node: SyntaxNode): string[] | undefined {
+  // Class decorators: direct children of class_declaration
+  if (node.type === "class_declaration") {
+    const decorators = node.children
+      .filter((c: SyntaxNode) => c.type === "decorator")
+      .map((c: SyntaxNode) => c.text as string);
+    return decorators.length > 0 ? decorators : undefined;
+  }
+  // Method/property decorators: preceding siblings in class_body
+  const parent = node.parent;
+  if (!parent) return undefined;
+  const idx = parent.children.indexOf(node);
+  const decorators: string[] = [];
+  for (let i = idx - 1; i >= 0; i--) {
+    if (parent.children[i].type === "decorator") {
+      decorators.unshift(parent.children[i].text as string);
+    } else break;
+  }
+  return decorators.length > 0 ? decorators : undefined;
+}
+
 function getJSDoc(node: SyntaxNode): string | null {
   // JSDoc is a comment sibling BEFORE the function/class node
   const parent = node.parent;
@@ -102,6 +123,7 @@ function extractFunctions(rootNode: SyntaxNode, _filePath: string): RawFunctionI
       visibility: isExported ? "public" : "private",
       isAsync: isAsync(node),
       docstring: getJSDoc(docNode) || undefined,
+      decorators: getTsDecorators(docNode),
       paramTypes: extractParamTypes(node),
     });
   }
@@ -203,6 +225,7 @@ function extractFunctions(rootNode: SyntaxNode, _filePath: string): RawFunctionI
         visibility: getVisibility(method),
         isAsync: isAsync(method),
         docstring: getJSDoc(method) || undefined,
+        decorators: getTsDecorators(method),
         paramTypes: extractParamTypes(method),
       });
     }
@@ -218,6 +241,7 @@ function extractFunctions(rootNode: SyntaxNode, _filePath: string): RawFunctionI
       visibility: "public",
       isAsync: false,
       docstring: getJSDoc(classOuterNode) || undefined,
+      decorators: getTsDecorators(classNode),
       classInfo: { inherits: [...extendsList, ...implementsList], methods: methodNames },
     });
   }

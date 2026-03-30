@@ -43,6 +43,11 @@ export function buildChunk(
     parts.push(record.signature);
   }
 
+  // Decorators/annotations: human-written semantic labels (@RestController, @EventListener, etc.)
+  if (record.decorators?.length) {
+    parts.push(record.decorators.join(" "));
+  }
+
   // Docstring content (no labels — the content speaks for itself)
   if (record.docstring) {
     if (record.docstring.summary) {

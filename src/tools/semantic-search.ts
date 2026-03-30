@@ -67,8 +67,9 @@ export async function handleSemanticSearch(
     return textResponse({ results: [], total_indexed: 0, search_mode: "skipped", note: "Query too short. Use at least 2 characters." });
   }
 
-  // Fetch extra to compensate for filtering, then trim
-  const fetchK = topK + 5;
+  // Fetch extra candidates: density adjustment eliminates constructors/accessors/tests,
+  // so we need a larger pool to ensure enough quality results survive.
+  const fetchK = topK * 3;
   const rawResults = await ws.search.search(
     { text: query },
     {
@@ -81,17 +82,18 @@ export async function handleSemanticSearch(
 
   // Filter out build artifacts, test fixtures, declaration files, and low-relevance noise
   const MIN_SCORE = 0.4;
-  const results = rawResults
+  const candidates = rawResults
     .filter(r =>
       !r.filePath.startsWith("dist/") &&
       !r.filePath.startsWith("test/fixtures/") &&
       !r.filePath.endsWith(".d.ts")
     )
-    .filter(r => r.score >= MIN_SCORE)
-    .slice(0, topK);
+    .filter(r => r.score >= MIN_SCORE);
 
-  // Enrich with line numbers, auto-summary, and relevance adjustments
-  const enriched = results.map(r => {
+  // Enrich ALL candidates — density adjustment needs the full pool to rerank properly.
+  // Premature .slice(topK) here would let constructors/accessors occupy slots that
+  // density would eliminate, cutting off better results at lower raw positions.
+  const enriched = candidates.map(r => {
     const record = ws.index.getById(r.id);
     // Auto-summary: use docstring summary if available, else build from signature
     let summary = r.summary;
@@ -115,9 +117,9 @@ export async function handleSemanticSearch(
   // Apply information density adjustments: demote low-info functions, boost high-info ones
   applyDensityAdjustment(enriched, ws, ctx.config);
 
-  // Re-sort by adjusted score and drop results that fell below threshold
+  // Re-sort by adjusted score, drop results that fell below threshold, then final cut
   enriched.sort((a, b) => b.score - a.score);
-  const finalResults = enriched.filter(r => r.score >= MIN_SCORE);
+  const finalResults = enriched.filter(r => r.score >= MIN_SCORE).slice(0, topK);
 
   // Clean up: remove internal record reference and round scores
   for (const r of finalResults) {

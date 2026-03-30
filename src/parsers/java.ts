@@ -31,6 +31,18 @@ function getJavadoc(node: SyntaxNode): string | null {
   return null;
 }
 
+function getAnnotations(node: SyntaxNode): string[] | undefined {
+  for (let i = 0; i < node.childCount; i++) {
+    if (node.children[i].type === "modifiers") {
+      const annotations = node.children[i].children
+        .filter((c: SyntaxNode) => c.type === "marker_annotation" || c.type === "annotation")
+        .map((c: SyntaxNode) => c.text as string);
+      return annotations.length > 0 ? annotations : undefined;
+    }
+  }
+  return undefined;
+}
+
 function getVisibility(node: SyntaxNode): "public" | "private" | "protected" {
   for (let i = 0; i < node.childCount; i++) {
     const c = node.children[i];
@@ -67,6 +79,7 @@ function extractFunctions(rootNode: SyntaxNode, _filePath: string): RawFunctionI
       visibility: getVisibility(node),
       isAsync: false,
       docstring: getJavadoc(node) || undefined,
+      decorators: getAnnotations(node),
     });
   }
 
@@ -84,6 +97,7 @@ function extractFunctions(rootNode: SyntaxNode, _filePath: string): RawFunctionI
       visibility: getVisibility(node),
       isAsync: false,
       docstring: getJavadoc(node) || undefined,
+      decorators: getAnnotations(node),
     });
   }
 
@@ -110,6 +124,7 @@ function extractFunctions(rootNode: SyntaxNode, _filePath: string): RawFunctionI
       visibility: getVisibility(node), isAsync: false,
       docstring: getJavadoc(node) || undefined,
       classInfo: { inherits, methods },
+      decorators: getAnnotations(node),
     });
   }
 

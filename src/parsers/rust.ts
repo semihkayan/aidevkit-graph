@@ -6,6 +6,22 @@ import { walkNodes, findParent, type SyntaxNode } from "./ast-utils.js";
 
 
 
+function getRustAttributes(node: SyntaxNode): string[] | undefined {
+  const parent = node.parent;
+  if (!parent) return undefined;
+  const idx = parent.children.indexOf(node);
+  const attrs: string[] = [];
+  for (let i = idx - 1; i >= 0; i--) {
+    const s = parent.children[i];
+    if (s.type === "attribute_item") {
+      attrs.unshift(s.text as string);
+    } else if (s.type === "line_comment") {
+      continue; // Skip doc comments between attributes
+    } else break;
+  }
+  return attrs.length > 0 ? attrs : undefined;
+}
+
 function getDocComment(node: SyntaxNode): string | null {
   const parent = node.parent;
   if (!parent) return null;
@@ -44,6 +60,7 @@ function extractFunctions(rootNode: SyntaxNode, _filePath: string): RawFunctionI
       visibility: isPublic ? "public" : "private",
       isAsync: node.children.some((c: SyntaxNode) => c.type === "async"),
       docstring: getDocComment(node) || undefined,
+      decorators: getRustAttributes(node),
     });
   }
 
@@ -60,6 +77,7 @@ function extractFunctions(rootNode: SyntaxNode, _filePath: string): RawFunctionI
       visibility: node.children.some((c: SyntaxNode) => c.type === "visibility_modifier") ? "public" : "private",
       isAsync: false,
       docstring: getDocComment(node) || undefined,
+      decorators: getRustAttributes(node),
       classInfo: { inherits: [], methods: [] },
     });
   }
