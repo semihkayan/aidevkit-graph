@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+This file contains only what an agent cannot easily derive from code: architectural decisions and their reasons, non-obvious conventions, and cross-cutting rules. If it's in the code or inferable from it, it doesn't belong here.
+
 ## What this project is
 
 MCP server that gives AI agents cheap, precise code understanding. Instead of dumping entire files into context, the agent queries local indexes (AST, call graph, type graph, vector search) and gets back only what it needs. All indexing is local and live — file watcher keeps everything current as code changes.
@@ -45,6 +47,10 @@ types/interfaces.ts  → All interfaces
 All concrete class instantiation is in `createServices()`. Tool handlers never import concrete classes — they receive `AppContext` which exposes only interfaces. To swap a component (e.g., LanceDB → Qdrant): change 1 line in `services.ts`.
 
 ## Rules
+
+### Language & project agnosticism
+
+All heuristics must be structural (body size, param count, call graph centrality), never based on naming conventions (`get/set` prefix) or framework-specific paths (`/entity/`, `/controllers/`). Every change must work across all 7 supported languages and any project structure.
 
 ### Tool handlers
 

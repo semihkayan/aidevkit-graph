@@ -40,11 +40,13 @@ async function main() {
   console.log(`Parsers loaded: ${parsers.length}`);
   console.log();
 
-  // Force mode: delete shared lance directory ONCE before all workspaces
+  // Force mode: clear both lance and AST cache for a truly clean rebuild
   if (force) {
-    const lancePath = path.join(resolvedRoot, ".code-context", "lance");
     const { rmSync } = await import("node:fs");
+    const lancePath = path.join(resolvedRoot, ".code-context", "lance");
+    const astCachePath = path.join(resolvedRoot, ".code-context", "ast-cache");
     try { rmSync(lancePath, { recursive: true, force: true }); } catch { /* may not exist */ }
+    try { rmSync(astCachePath, { recursive: true, force: true }); } catch { /* may not exist */ }
   }
 
   for (const wsPath of workspacePaths) {

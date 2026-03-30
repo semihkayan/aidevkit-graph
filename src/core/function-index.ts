@@ -262,9 +262,10 @@ export class FunctionIndex implements IFunctionIndexReader, IFunctionIndexWriter
       const newHash = await this.stalenessChecker.computeHash(absPath);
       if (this.fileHashes.get(relPath) === newHash) continue;
 
-      // Delete old records
+      // Delete old records and track their IDs for vector cleanup
       const oldIds = this.fileIndex.get(relPath) || [];
       for (const id of oldIds) this.removeRecord(id);
+      changedFunctionIds.push(...oldIds);
 
       // Find parser
       const parser = this.parsers.find(p => p.canParse(absPath));
