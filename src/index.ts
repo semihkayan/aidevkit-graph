@@ -35,7 +35,7 @@ async function main() {
   const ctx = services;
 
   server.registerTool("semantic_search", {
-    description: "Search the codebase by meaning. Use INSTEAD OF grep/glob when looking for code related to a concept, feature, or bug. Finds functions even when you don't know exact names. Returns ranked results with signatures and file locations.",
+    description: "Search the codebase by meaning. Use as the FIRST STEP when looking for code related to a concept, feature, or bug — before grep or reading files. Finds functions even when you don't know exact names. Results include signature, body size, summary, and file location to help you decide what to open.",
     inputSchema: SemanticSearchSchema.shape,
   }, (args) => handleSemanticSearch(args as any, ctx));
 
