@@ -5,6 +5,13 @@ import { applyDensityAdjustment, countParamsFromSignature } from "./density-scor
 
 const MIN_SCORE = 0.4;
 
+/** Detect if the search query explicitly targets test code (e.g., "UserStreak test", "handler_test", "DailyActivityTest"). */
+function queryTargetsTests(query: string): boolean {
+  // \btest|_test: word-boundary or underscore prefix — covers "test auth", "handler_test", "test_payment"
+  // [a-z]Test: camelCase suffix (case-sensitive to avoid "latest"→"atest") — covers "DailyActivityTest"
+  return /\btest|_test/i.test(query) || /[a-z]Test/.test(query);
+}
+
 /**
  * Generate a brief summary from function metadata when no docstring exists.
  * Gives the agent enough context to triage search results without opening source.
@@ -115,8 +122,8 @@ async function searchSingleWorkspace(
     })
     .filter((r): r is NonNullable<typeof r> => r !== null);
 
-  // Apply information density adjustments per-workspace (centrality is workspace-local)
-  applyDensityAdjustment(enriched, ws, ctx.config);
+  // Apply information density adjustments per-workspace (centrality is workspace-local).
+  applyDensityAdjustment(enriched, ws, ctx.config, { skipTestPenalty: queryTargetsTests(query) });
 
   return { results: enriched, desyncCount };
 }

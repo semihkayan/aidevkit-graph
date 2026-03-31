@@ -171,25 +171,13 @@ export function isAccessor(record: FunctionRecord, callEntry: CallGraphEntry | u
   return true;
 }
 
-// === Test File Detection (orthogonal to density) ===
-
-/**
- * Language-agnostic test file detection:
- * - Directory: test/, tests/, __tests__/, spec/
- * - File naming: .test.ts, .spec.js, _test.go, _test.py
- */
-const TEST_FILE_PATTERN = /(?:^|\/)(?:tests?|__tests__)\/|\.(?:test|spec)\.|_test\./i;
-
-export function isTestFile(filePath: string): boolean {
-  return TEST_FILE_PATTERN.test(filePath);
-}
-
 // === Apply to Search Results ===
 
 export function applyDensityAdjustment(
   results: Array<{ score: number; record: FunctionRecord | null; [key: string]: unknown }>,
   ws: WorkspaceServices,
   config: Config,
+  options?: { skipTestPenalty?: boolean },
 ): void {
   const densityConfig = config.search.density;
   if (!densityConfig.enabled) return;
@@ -221,7 +209,8 @@ export function applyDensityAdjustment(
     }
 
     // Test files: large body → high density score, but shows verification not behavior.
-    if (isTestFile(r.record.filePath)) {
+    // Skip when caller signals a test-related query (agent explicitly looking for tests).
+    if (r.record.structuralHints?.isTest && !options?.skipTestPenalty) {
       r.score *= testFilePenalty;
     }
   }

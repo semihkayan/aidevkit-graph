@@ -50,6 +50,7 @@ export interface StructuralHints {
   isConstructor?: boolean;   // AST-confirmed: constructor_declaration, __init__
   isAbstract?: boolean;      // AST-confirmed: abstract keyword, @abstractmethod
   propertyAccess?: boolean;  // AST-confirmed: get/set keyword, @property, C# property
+  isTest?: boolean;          // AST-confirmed: test decorator (@Test, #[test]) or test framework import (junit, pytest, jest, etc.)
 }
 
 export interface ParsedDocstring {

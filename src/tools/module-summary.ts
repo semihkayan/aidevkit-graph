@@ -76,21 +76,6 @@ export async function handleModuleSummary(
   });
 }
 
-const TEST_PATH_PATTERNS = [
-  // Directory-based (all languages)
-  /\/test\//i, /\/tests\//i, /\/__tests__\//i, /\/__test__\//i, /\/spec\//i,
-  // C# test project convention: MyProject.Tests/
-  /\.Tests\//,
-  // File suffix: FooTest.java, foo.test.ts, foo.spec.js, foo_test.go, foo_test.py
-  /Test\.\w+$/, /\.test\.\w+$/, /\.spec\.\w+$/, /_test\.\w+$/,
-  // Python prefix: test_foo.py
-  /\/test_[^/]+\.py$/,
-];
-
-function isTestFile(filePath: string): boolean {
-  return TEST_PATH_PATTERNS.some(p => p.test(filePath));
-}
-
 function buildModuleOutput(
   module: string,
   records: FunctionRecord[],
@@ -103,15 +88,18 @@ function buildModuleOutput(
     ? records.filter(r => r.filePath.endsWith(file))
     : records;
 
-  // Exclude test files by default — agent rarely needs tests when exploring a module's API.
-  // If the module path itself is a test directory, keep them (user explicitly asked for tests).
-  // Prepend "/" so top-level module names like "test" or "tests" match directory patterns.
-  const moduleIsTestDir = isTestFile("/" + module + "/x");
+  // Exclude test records by default — agent rarely needs tests when exploring a module's API.
+  // If ≥80% of records are tests, this is a test module — keep them (user explicitly asked).
+  const TEST_MODULE_THRESHOLD = 0.8;
   let testFilesExcluded = 0;
-  if (!moduleIsTestDir && !file) {
-    const before = filtered.length;
-    filtered = filtered.filter(r => !isTestFile(r.filePath));
-    testFilesExcluded = before - filtered.length;
+  if (!file) {
+    const testCount = filtered.filter(r => r.structuralHints?.isTest).length;
+    const moduleIsTestDir = testCount > 0 && testCount >= filtered.length * TEST_MODULE_THRESHOLD;
+    if (!moduleIsTestDir) {
+      const before = filtered.length;
+      filtered = filtered.filter(r => !r.structuralHints?.isTest);
+      testFilesExcluded = before - filtered.length;
+    }
   }
 
   // Determine detail level

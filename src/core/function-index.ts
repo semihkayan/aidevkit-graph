@@ -9,6 +9,61 @@ import type { FunctionRecord } from "../types/index.js";
 import { readFile, computeModule, detectLanguage } from "../utils/file-utils.js";
 import { globSourceFiles } from "../utils/file-utils.js";
 
+// Test framework decorators — if ANY function in a file has one, the file is a test file
+const TEST_DECORATORS = [
+  // Java/Kotlin (JUnit, TestNG)
+  "@Test", "@ParameterizedTest", "@RepeatedTest", "@BeforeEach", "@AfterEach",
+  "@BeforeAll", "@AfterAll", "@Nested", "@ExtendWith",
+  // C# (NUnit, xUnit, MSTest)
+  "@[Test]", "@[TestMethod]", "@[Fact]", "@[Theory]", "@[TestFixture]", "@[SetUp]", "@[TearDown]",
+  // Rust
+  "#[test]", "#[cfg(test)]",
+  // Python (pytest)
+  "@pytest.mark",
+];
+
+// Test framework import prefixes per language — if a file imports from these, it's a test file
+const TEST_IMPORT_PREFIXES: Record<string, string[]> = {
+  java: ["org.junit", "org.mockito", "org.assertj", "org.springframework.boot.test", "org.springframework.test", "org.testng"],
+  kotlin: ["org.junit", "org.mockito", "org.assertj", "kotlin.test"],
+  python: ["pytest", "unittest", "hypothesis"],
+  typescript: ["jest", "vitest", "@jest", "@testing-library", "enzyme", "supertest", "@playwright/test", "cypress"],
+  javascript: ["jest", "vitest", "@jest", "@testing-library", "enzyme", "supertest", "mocha", "chai", "@playwright/test", "cypress"],
+  go: ["testing", "github.com/stretchr/testify"],
+  rust: ["mockall", "proptest"],
+  csharp: ["NUnit", "Xunit", "Microsoft.VisualStudio.TestTools", "Moq", "FluentAssertions"],
+};
+
+function hasTestDecorator(records: FunctionRecord[]): boolean {
+  return records.some(r =>
+    r.decorators?.some(d =>
+      TEST_DECORATORS.some(td => d.includes(td))
+    )
+  );
+}
+
+/**
+ * Detect whether a file contains test code using structural signals:
+ * 1. Decorator check (free — already extracted): @Test, #[test], [Fact], etc.
+ * 2. Import check (one parseImports call): junit, pytest, jest, testing, etc.
+ */
+function detectTestFile(
+  fileRecords: FunctionRecord[],
+  parser: ILanguageParser,
+  source: string,
+  filePath: string,
+  config: Config,
+): boolean {
+  if (hasTestDecorator(fileRecords)) return true;
+
+  const language = fileRecords[0]?.language || detectLanguage(filePath, config.parser.languages) || "";
+  const prefixes = TEST_IMPORT_PREFIXES[language];
+  if (!prefixes) return false;
+
+  const imports = parser.parseImports(source, filePath);
+  return imports.some(imp => prefixes.some(prefix => imp.modulePath.startsWith(prefix)));
+}
+
 export class FunctionIndex implements IFunctionIndexReader, IFunctionIndexWriter {
   private records = new Map<string, FunctionRecord>();
   private fileIndex = new Map<string, string[]>();      // filePath → [record ids]
@@ -275,8 +330,20 @@ export class FunctionIndex implements IFunctionIndexReader, IFunctionIndexWriter
       const source = await readFile(absPath);
       const rawFunctions = parser.parseFunctions(source, absPath);
 
+      // Build records
+      const fileRecords: FunctionRecord[] = [];
       for (const raw of rawFunctions) {
-        const record = this.toFunctionRecord(raw, relPath, newHash);
+        fileRecords.push(this.toFunctionRecord(raw, relPath, newHash));
+      }
+
+      // Mark test files structurally (decorator + import analysis)
+      if (detectTestFile(fileRecords, parser, source, relPath, this.config)) {
+        for (const record of fileRecords) {
+          record.structuralHints = { ...record.structuralHints, isTest: true };
+        }
+      }
+
+      for (const record of fileRecords) {
         this.addRecord(record);
         changedFunctionIds.push(record.id);
       }
