@@ -10,6 +10,15 @@ import type { FunctionRecord } from "../types/index.js";
 import { readFile, computeModule, detectLanguage } from "../utils/file-utils.js";
 import { globSourceFiles } from "../utils/file-utils.js";
 
+function decomposeIdentifier(name: string): string[] {
+  return name
+    .replace(/([a-z])([A-Z])/g, "$1\0$2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1\0$2")
+    .replace(/_/g, "\0")
+    .split("\0")
+    .filter(s => s.length > 0);
+}
+
 /**
  * Detect whether a file contains test code using structural signals from parser metadata:
  * 1. Decorator check (free — already extracted): @Test, #[test], [Fact], etc.
@@ -160,6 +169,54 @@ export class FunctionIndex implements IFunctionIndexReader, IFunctionIndexWriter
     return (this.nameIndex.get(name) || [])
       .map(id => this.records.get(id)!)
       .filter(Boolean);
+  }
+
+  findByClassAware(query: string): FunctionRecord[] {
+    const segments = decomposeIdentifier(query);
+    if (segments.length < 2) return [];
+
+    const verb = segments[0].toLowerCase();
+    const context = segments.slice(1).filter(s => s.length > 2).map(s => s.toLowerCase());
+    if (context.length === 0) return [];
+
+    // Score each class/interface record by context + verb match
+    const candidates: Array<{ record: FunctionRecord; score: number }> = [];
+    for (const rec of this.records.values()) {
+      if (rec.kind !== "class" && rec.kind !== "interface") continue;
+
+      const nameLower = rec.name.toLowerCase();
+      if (!context.every(seg => nameLower.includes(seg))) continue;
+
+      let score = context.length;
+      if (nameLower.includes(verb)) score += 2;
+      if (rec.structuralHints?.isTest) score -= 3;
+
+      candidates.push({ record: rec, score });
+    }
+
+    if (candidates.length === 0) return [];
+    candidates.sort((a, b) => b.score - a.score);
+
+    // For top-scoring class(es), find methods matching verb
+    const topScore = candidates[0].score;
+    const seen = new Set<string>();
+    const results: FunctionRecord[] = [];
+
+    for (const { record: classRec, score } of candidates) {
+      if (score < topScore - 1) break;
+      for (const methodName of classRec.classInfo?.methods || []) {
+        if (methodName === "constructor" || methodName === "__init__") continue;
+        const mLower = methodName.toLowerCase();
+        if (mLower === verb || verb.startsWith(mLower) || mLower.startsWith(verb)) {
+          const fullName = `${classRec.name}.${methodName}`;
+          if (seen.has(fullName)) continue;
+          seen.add(fullName);
+          results.push(...this.findByExactName(fullName));
+        }
+      }
+    }
+
+    return results;
   }
 
   getAllModules(): string[] {

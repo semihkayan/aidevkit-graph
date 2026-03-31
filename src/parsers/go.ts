@@ -4,8 +4,6 @@ import type { RawFunctionInfo, RawCallInfo, RawImportInfo, RawTypeRelationship }
 import type { TreeSitterLanguageConfig } from "./tree-sitter-parser.js";
 import { walkNodes, findParent, type SyntaxNode } from "./ast-utils.js";
 
-
-
 function getDocComment(node: SyntaxNode): string | null {
   const parent = node.parent;
   if (!parent) return null;

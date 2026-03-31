@@ -4,8 +4,6 @@ import type { RawFunctionInfo, RawCallInfo, RawImportInfo, RawTypeRelationship, 
 import type { TreeSitterLanguageConfig } from "./tree-sitter-parser.js";
 import { walkNodes, findParent, type SyntaxNode } from "./ast-utils.js";
 
-
-
 function getJavadoc(node: SyntaxNode): string | null {
   const parent = node.parent;
   if (!parent) return null;
@@ -65,8 +63,8 @@ function extractFunctions(rootNode: SyntaxNode, _filePath: string): RawFunctionI
     const params = node.childForFieldName("parameters")?.text || "()";
     const retType = node.childForFieldName("type")?.text || "void";
 
-    // Parent class
-    const classNode = findParent(node, "class_declaration");
+    // Parent class or interface
+    const classNode = findParent(node, "class_declaration") || findParent(node, "interface_declaration");
     const className = classNode?.childForFieldName("name")?.text;
     const fullName = className ? `${className}.${name}` : name;
 
@@ -131,6 +129,33 @@ function extractFunctions(rootNode: SyntaxNode, _filePath: string): RawFunctionI
       docstring: getJavadoc(node) || undefined,
       classInfo: { inherits, methods },
       decorators: getAnnotations(node),
+    });
+  }
+
+  // Interfaces
+  for (const node of walkNodes(rootNode, ["interface_declaration"])) {
+    const name = node.childForFieldName("name")?.text;
+    if (!name) continue;
+
+    // Java interfaces use "extends_interfaces" node (not "interfaces" which is for class implements)
+    const extendsNode = node.children.find((c: SyntaxNode) => c.type === "extends_interfaces");
+    const inherits: string[] = extendsNode
+      ? walkNodes(extendsNode, ["type_identifier"]).map((t: SyntaxNode) => t.text)
+      : [];
+
+    const body = node.childForFieldName("body");
+    const methods = body ? body.children
+      .filter((c: SyntaxNode) => c.type === "method_declaration")
+      .map((m: SyntaxNode) => m.childForFieldName("name")?.text)
+      .filter(Boolean) as string[] : [];
+
+    results.push({
+      name, kind: "interface",
+      signature: `interface ${name}${inherits.length > 0 ? ` extends ${inherits.join(", ")}` : ""}`,
+      lineStart: node.startPosition.row + 1, lineEnd: node.endPosition.row + 1,
+      visibility: getVisibility(node), isAsync: false,
+      docstring: getJavadoc(node) || undefined,
+      classInfo: { inherits, methods },
     });
   }
 

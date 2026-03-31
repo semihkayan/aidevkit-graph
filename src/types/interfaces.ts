@@ -13,6 +13,7 @@ export interface IFunctionIndexReader {
   getByTags(tags: string[], matchMode: "all" | "any"): FunctionRecord[];
   findByName(name: string, module?: string): FunctionRecord[];
   findByExactName(name: string): FunctionRecord[];
+  findByClassAware(query: string): FunctionRecord[];
   getAllModules(): string[];
   getAllFilePaths(): string[];
   getFileRecordIds(filePath: string): string[];

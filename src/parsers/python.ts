@@ -5,7 +5,6 @@ import { walkNodes, findParent, type SyntaxNode } from "./ast-utils.js";
 
 const require = createRequire(import.meta.url);
 
-
 function getDocstring(node: SyntaxNode): string | null {
   // Python docstring: first statement in body is expression_statement > string
   const body = node.childForFieldName("body");

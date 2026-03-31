@@ -122,6 +122,17 @@ export function textResponse(data: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
 }
 
+/**
+ * Structural disambiguation: when multiple matches exist, filter out abstract
+ * declarations and single-line interface stubs to prefer implementations.
+ */
+function structuralDisambiguate(matches: FunctionRecord[]): FunctionRecord[] {
+  const filtered = matches.filter(r =>
+    !r.structuralHints?.isAbstract && (r.lineEnd - r.lineStart) > 0
+  );
+  return filtered.length > 0 ? filtered : matches;
+}
+
 // Resolve function by name — shared pattern for 5+ tool handlers
 export function resolveFunctionOrError(
   ws: WorkspaceServices,
@@ -140,6 +151,38 @@ export function resolveFunctionOrError(
       r.filePath.endsWith(module + ".rs") || r.filePath.endsWith(module + ".cs")
     );
     if (byFile.length > 0) matches = byFile;
+  }
+
+  // Fallback: dot-notation decomposition (ClassName.wrongMethodName → ClassName.realMethod)
+  if (matches.length === 0 && name.includes(".")) {
+    const dotIdx = name.indexOf(".");
+    const className = name.substring(0, dotIdx);
+    const methodAttempt = name.substring(dotIdx + 1).toLowerCase();
+    const classRecords = ws.index.findByExactName(className);
+    const classRec = classRecords.find(r => r.kind === "class" || r.kind === "interface");
+    if (classRec?.classInfo?.methods) {
+      for (const methodName of classRec.classInfo.methods) {
+        if (methodName === "constructor" || methodName === "__init__") continue;
+        const mLower = methodName.toLowerCase();
+        if (mLower === methodAttempt || methodAttempt.startsWith(mLower) || mLower.startsWith(methodAttempt)) {
+          matches.push(...ws.index.findByExactName(`${className}.${methodName}`));
+          break;  // First match wins — avoid ambiguity from multiple partial matches
+        }
+      }
+    }
+  }
+
+  // Fallback: class-aware camelCase decomposition (recordDailyActivity → RecordDailyActivityService.record)
+  if (matches.length === 0) {
+    matches = ws.index.findByClassAware(name);
+    if (matches.length > 0 && module) {
+      // Module param may be a module path OR a class/file name hint
+      const byModule = matches.filter(r => r.module === module || r.module.startsWith(`${module}/`));
+      const byFileHint = byModule.length === 0
+        ? matches.filter(r => r.filePath.includes(module) || r.name.startsWith(module + "."))
+        : [];
+      matches = byModule.length > 0 ? byModule : byFileHint.length > 0 ? byFileHint : matches;
+    }
   }
 
   if (matches.length === 0) {
@@ -163,20 +206,26 @@ export function resolveFunctionOrError(
   }
 
   if (matches.length > 1) {
-    // If module was given but still ambiguous (same module, different files),
-    // check if module is actually a file path hint
+    // Structural disambiguation: filter abstract/interface stubs
+    const disambiguated = structuralDisambiguate(matches);
+    if (disambiguated.length === 1) return { record: disambiguated[0] };
+
+    // If module was given but still ambiguous, check if module is a file path hint
     if (module) {
-      const fileMatch = matches.find(r =>
-        r.filePath.includes(module) || r.filePath.endsWith(module + ".ts") || r.filePath.endsWith(module + ".py") || r.filePath.endsWith(module + ".js")
+      const fileMatch = disambiguated.find(r =>
+        r.filePath.includes(module) || r.filePath.endsWith(module + ".ts") ||
+        r.filePath.endsWith(module + ".py") || r.filePath.endsWith(module + ".js") ||
+        r.filePath.endsWith(module + ".java") || r.filePath.endsWith(module + ".go") ||
+        r.filePath.endsWith(module + ".rs") || r.filePath.endsWith(module + ".cs")
       );
       if (fileMatch) return { record: fileMatch };
     }
 
     return {
       error: errorResponse("AMBIGUOUS_FUNCTION",
-        `Multiple functions named '${name}'.${module ? ` Module '${module}' still matches ${matches.length}.` : ""} Use module parameter with a file path hint to disambiguate.`,
-        `Example: module: '${matches[0].filePath.replace(/\.[^.]+$/, "").split("/").pop()}'`,
-        { matches: matches.map(r => ({ name: r.name, module: r.module, file: r.filePath })) })
+        `Multiple functions named '${name}'.${module ? ` Module '${module}' still matches ${disambiguated.length}.` : ""} Use module parameter with a file path hint to disambiguate.`,
+        `Example: module: '${disambiguated[0].filePath.replace(/\.[^.]+$/, "").split("/").pop()}'`,
+        { matches: disambiguated.map(r => ({ name: r.name, module: r.module, file: r.filePath })) })
     };
   }
 

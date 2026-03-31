@@ -4,8 +4,6 @@ import type { RawFunctionInfo, RawCallInfo, RawImportInfo, RawTypeRelationship, 
 import type { TreeSitterLanguageConfig } from "./tree-sitter-parser.js";
 import { walkNodes, findParent, type SyntaxNode } from "./ast-utils.js";
 
-
-
 function getTsDecorators(node: SyntaxNode): string[] | undefined {
   // Class decorators: direct children of class_declaration
   if (node.type === "class_declaration") {
