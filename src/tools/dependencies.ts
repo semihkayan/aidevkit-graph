@@ -3,9 +3,11 @@ import { resolveWorkspaceOrError, resolveFunctionOrError, textResponse } from ".
 
 // Common utility calls that are noise in dependency analysis
 const NOISE_TARGETS = new Set([
+  // Python
   "print", "len", "range", "str", "int", "float", "bool", "list", "dict", "set", "tuple",
   "isinstance", "issubclass", "hasattr", "getattr", "setattr", "super", "type", "id", "hash",
   "enumerate", "zip", "map", "filter", "sorted", "reversed", "max", "min", "sum", "any", "all",
+  // JavaScript/TypeScript
   "console.log", "console.error", "console.warn", "console.info", "console.debug",
   "JSON.parse", "JSON.stringify", "Object.keys", "Object.values", "Object.entries",
   "Object.assign", "Object.freeze", "Object.create", "Array.from", "Array.isArray",
@@ -13,36 +15,167 @@ const NOISE_TARGETS = new Set([
   "Promise.all", "Promise.resolve", "Promise.reject", "Promise.allSettled",
   "Date.now", "Number.parseInt", "Number.parseFloat", "String.fromCharCode",
   "Set.has", "Map.has", "Map.get", "Map.set",
+  // Python qualified
+  "os.path.join", "os.path.exists", "os.path.dirname", "os.path.basename",
+  "os.path.abspath", "os.makedirs", "os.listdir", "os.remove",
+  "json.loads", "json.dumps", "json.load", "json.dump",
+  "logging.getLogger", "logging.info", "logging.debug", "logging.warning", "logging.error",
+  "datetime.now", "datetime.utcnow", "datetime.strptime", "datetime.strftime",
+  "time.time", "time.sleep",
+  "re.match", "re.search", "re.sub", "re.compile", "re.findall",
+  "copy.deepcopy", "copy.copy",
+  // Go
   "fmt.Println", "fmt.Printf", "fmt.Sprintf", "fmt.Errorf", "fmt.Fprintf",
-  "errors.New", "errors.Is", "errors.As",
+  "errors.New", "errors.Is", "errors.As", "errors.Unwrap",
+  "context.Background", "context.TODO", "context.WithCancel", "context.WithTimeout",
+  "strings.Contains", "strings.HasPrefix", "strings.HasSuffix", "strings.TrimSpace",
+  "strings.Split", "strings.Join", "strings.Replace", "strings.ToLower", "strings.ToUpper",
+  "strconv.Itoa", "strconv.Atoi", "strconv.FormatInt", "strconv.ParseInt",
+  "filepath.Join", "filepath.Dir", "filepath.Base", "filepath.Ext",
+  "sync.WaitGroup", "sync.Mutex", "sync.Once",
+  "log.Println", "log.Printf", "log.Fatal", "log.Fatalf",
+  "math.Max", "math.Min", "math.Abs",
+  // Java stdlib
+  "Instant.now", "Objects.requireNonNull", "Objects.hash", "Objects.equals",
+  "UUID.randomUUID", "Duration.between", "Duration.ofSeconds", "Duration.ofMinutes",
+  "Date.from", "BigDecimal.valueOf", "Optional.of", "Optional.ofNullable", "Optional.empty",
+  "Collections.unmodifiableList", "Collections.singletonList",
+  "Collections.emptyList", "Collections.emptyMap", "Stream.of",
+  "ResponseEntity.ok", "ResponseEntity.status", "ResponseEntity.notFound",
+  "Arrays.asList", "Arrays.stream", "Arrays.sort",
+  "Integer.parseInt", "Integer.valueOf", "Long.parseLong", "Long.valueOf",
+  "String.format", "String.valueOf", "Boolean.parseBoolean",
+  // C#
+  "Console.WriteLine", "Console.Write", "Console.ReadLine",
+  "Convert.ToInt32", "Convert.ToString", "Convert.ToDouble",
+  "Guid.NewGuid", "Guid.Parse", "Guid.Empty",
+  "DateTime.Now", "DateTime.UtcNow", "DateTime.Parse", "DateTime.TryParse",
+  "TimeSpan.FromSeconds", "TimeSpan.FromMinutes", "TimeSpan.FromHours",
+  "Task.Run", "Task.WhenAll", "Task.WhenAny", "Task.FromResult", "Task.CompletedTask",
+  "string.IsNullOrEmpty", "string.IsNullOrWhiteSpace", "string.Join", "string.Format",
+  "Path.Combine", "Path.GetExtension", "Path.GetFileName",
+  "File.ReadAllText", "File.WriteAllText", "File.Exists",
+  "Enum.Parse", "Enum.TryParse",
+  // Rust
+  "println!", "eprintln!", "format!", "panic!", "todo!", "unimplemented!",
+  "vec!", "assert!", "assert_eq!", "assert_ne!",
+  "String.from", "String.new",
+  "Vec.new", "Vec.with_capacity",
+  "HashMap.new", "HashSet.new", "BTreeMap.new",
+  "Box.new", "Arc.new", "Rc.new", "Mutex.new", "RwLock.new",
+  "Option.unwrap", "Option.expect", "Option.map", "Option.and_then",
+  "Result.unwrap", "Result.expect", "Result.map", "Result.map_err",
+  "Ok", "Err", "Some", "None",
 ]);
 
 // Common JS/TS built-in methods that appear as unresolved calls
 const BUILTIN_METHODS = new Set([
-  // Array
+  // JS/TS Array
   "map", "filter", "reduce", "forEach", "find", "some", "every", "includes",
   "push", "pop", "shift", "unshift", "slice", "splice", "concat", "flat", "flatMap",
   "join", "sort", "reverse", "indexOf", "lastIndexOf", "fill", "copyWithin", "at",
-  // Map/Set/Iterables
+  // JS/TS Map/Set/Iterables
   "entries", "values", "keys", "has", "get", "set", "delete", "add", "clear",
-  // String
+  // JS/TS String
   "trim", "trimStart", "trimEnd", "split", "replace", "replaceAll",
-  "match", "matchAll", "startsWith", "endsWith", "includes",
+  "match", "matchAll", "startsWith", "endsWith",
   "padStart", "padEnd", "repeat", "charAt", "charCodeAt", "substring", "toLowerCase", "toUpperCase",
-  // Object/General
-  "toString", "valueOf", "toJSON", "assign", "create", "freeze", "from", "isArray",
-  // Promise
+  // JS/TS Object/General
+  "toJSON", "assign", "create", "freeze", "from", "isArray",
+  // JS/TS Promise
   "then", "catch", "finally",
+  // Java common
+  "orElse", "orElseGet", "orElseThrow", "isPresent", "ifPresent",
+  "stream", "collect", "toList", "of", "copyOf",
+  "equals", "hashCode", "compareTo", "toString", "valueOf", "getClass",
+  "intValue", "longValue", "doubleValue", "floatValue",
+  "name", "ordinal",
+  // Python
+  "append", "extend", "insert", "remove", "items", "update", "strip", "lstrip", "rstrip",
+  "encode", "decode", "format", "upper", "lower", "capitalize", "title",
+  "count", "index", "copy", "pop",
+  // Go (methods)
+  "Error", "String", "Close", "Read", "Write", "Len", "Cap",
+  "Lock", "Unlock", "RLock", "RUnlock", "Wait", "Signal", "Broadcast",
+  "Done", "Err", "Value", "Deadline",
+  // C#
+  "Any", "All", "Where", "Select", "SelectMany", "FirstOrDefault", "First",
+  "SingleOrDefault", "Single", "Count", "Sum", "Average", "OrderBy", "OrderByDescending",
+  "GroupBy", "Distinct", "Skip", "Take", "ToArray",
+  "Add", "Remove", "Contains", "ContainsKey", "TryGetValue",
+  "Append", "Insert", "RemoveAt", "AddRange",
+  "GetAwaiter", "GetResult", "ConfigureAwait",
+  "Dispose",
+  // Rust
+  "unwrap", "expect", "unwrap_or", "unwrap_or_else", "unwrap_or_default",
+  "map", "and_then", "or_else", "ok_or", "ok_or_else",
+  "iter", "into_iter", "collect", "for_each",
+  "len", "is_empty", "contains", "insert", "remove", "push", "pop",
+  "clone", "to_string", "to_owned", "as_ref", "as_mut",
+  "lock", "read", "write", "try_lock",
+  "into", "from", "try_into", "try_from",
 ]);
+
+// Stdlib namespace patterns — catch entire modules without listing each method
+const NOISE_PATTERNS = [
+  // Loggers (all languages)
+  /^(logger|log|logging|console|slog|zap|logrus|Log|_logger|_log|ILogger)\.\w+$/i,
+  // Python stdlib modules
+  /^(os|os\.path|sys|io|pathlib|typing|abc|dataclasses|functools|itertools|collections|math|random|shutil|glob|subprocess|tempfile|unittest|pytest)\.\w+$/,
+  // Go stdlib packages
+  /^(fmt|errors|context|strings|strconv|filepath|sync|log|math|sort|io|bytes|os|time|reflect|regexp|testing|net|http|encoding)\.\w+$/,
+  // Java stdlib classes
+  /^(System|Math|Arrays|Collections|Objects|Optional|Stream|Collectors|Integer|Long|Double|Float|String|Boolean|Character|BigDecimal|BigInteger|UUID|Instant|Duration|LocalDate|LocalDateTime|ZonedDateTime|Date|TimeUnit|Pattern|Matcher|StringBuilder|StringBuffer|Thread|Executors|CompletableFuture|AtomicInteger|AtomicLong|ResponseEntity|HttpStatus)\.\w+$/,
+  // C# stdlib classes
+  /^(Console|Convert|Guid|DateTime|DateTimeOffset|TimeSpan|Task|Math|Enum|Path|File|Directory|Regex|StringBuilder|Activator|GC|Monitor|Interlocked|CancellationToken|JsonSerializer|Environment)\.\w+$/,
+  // Rust std types (qualified)
+  /^(String|Vec|HashMap|HashSet|BTreeMap|BTreeSet|Box|Arc|Rc|Mutex|RwLock|Cell|RefCell|Option|Result|Cow|Pin)\.\w+$/,
+  // Test assertions (all frameworks)
+  /^(Assert|Assertions|Expect|expect|assert|assertThat|verify|mock|when|given)\.\w+$/i,
+];
 
 function isNoisyCall(target: string): boolean {
   if (NOISE_TARGETS.has(target)) return true;
-  // logger.*, log.* calls
-  if (/^(logger|log|logging|console)\.\w+$/.test(target)) return true;
+  if (NOISE_PATTERNS.some(p => p.test(target))) return true;
   // Built-in method calls: x.map, x.filter, x.push, etc.
   const method = target.split(".").pop();
   if (method && target.includes(".") && BUILTIN_METHODS.has(method)) return true;
   return false;
+}
+
+/**
+ * Collapse fluent method chains into one entry per chain.
+ * Java/TS chains like Jwts.builder().subject().claim() produce a separate
+ * call_expression for each .method(). Keep only the outermost per root per line.
+ */
+function deduplicateChains<T extends { target: string; line: number }>(calls: T[]): T[] {
+  // Group by line + root object (first segment before "." or "(")
+  const byLineAndRoot = new Map<string, T>();
+  for (const c of calls) {
+    const root = c.target.split(".")[0].split("(")[0];
+    const key = `${c.line}:${root}`;
+    const existing = byLineAndRoot.get(key);
+    // Keep the longest target (outermost chain call)
+    if (!existing || c.target.length > existing.target.length) {
+      byLineAndRoot.set(key, c);
+    }
+  }
+
+  const result = Array.from(byLineAndRoot.values());
+
+  // Simplify long chain targets: "Jwts.builder().subject()...compact" → "Jwts.compact"
+  for (const c of result) {
+    if (c.target.includes("(")) {
+      const firstObj = c.target.split(".")[0].split("(")[0];
+      const parts = c.target.split(".");
+      const lastMethod = parts[parts.length - 1].split("(")[0];
+      if (firstObj && lastMethod && firstObj !== lastMethod) {
+        c.target = `${firstObj}.${lastMethod}`;
+      }
+    }
+  }
+
+  return result;
 }
 
 function matchesDep(target: string, dep: string): boolean {
@@ -75,9 +208,12 @@ export async function handleDependencies(
   const docstringOnly: string[] = [];
 
   if (entry) {
-    for (const call of entry.calls) {
-      // Filter noise
-      if (isNoisyCall(call.target)) continue;
+    // Pre-filter noise and collapse fluent chains before categorization
+    const calls = deduplicateChains(
+      entry.calls.filter(c => !isNoisyCall(c.target))
+    );
+
+    for (const call of calls) {
 
       if (call.resolvedId) {
         const targetRecord = ws.index.getById(call.resolvedId);
