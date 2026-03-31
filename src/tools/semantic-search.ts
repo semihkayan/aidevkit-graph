@@ -1,7 +1,7 @@
 import type { AppContext } from "../types/interfaces.js";
 import type { FunctionRecord } from "../types/index.js";
 import { resolveWorkspaceOrError, textResponse } from "./tool-utils.js";
-import { applyDensityAdjustment } from "./density-scorer.js";
+import { applyDensityAdjustment, countParamsFromSignature } from "./density-scorer.js";
 
 /**
  * Generate a brief summary from function metadata when no docstring exists.
@@ -30,13 +30,9 @@ function buildAutoSummary(record: FunctionRecord): string {
   parts.push(record.kind);
   if (record.isAsync) parts.push("async");
 
-  // Param count
-  const paramMatch = record.signature.match(/\(([^)]*)\)/);
-  const params = paramMatch?.[1]?.trim();
-  if (params) {
-    const paramCount = params.split(",").filter(Boolean).length;
-    if (paramCount > 0) parts.push(`${paramCount} param${paramCount !== 1 ? "s" : ""}`);
-  }
+  // Param count (handles nested parens like callback: (err: Error) => void)
+  const paramCount = countParamsFromSignature(record.signature);
+  if (paramCount > 0) parts.push(`${paramCount} param${paramCount !== 1 ? "s" : ""}`);
 
   // Return type
   const retMatch = record.signature.match(/\)\s*(?:->|:)\s*(.+)$/);

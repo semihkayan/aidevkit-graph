@@ -79,9 +79,13 @@ export class HybridSearchPipeline implements ISearchPipeline {
       }
     }
 
-    // Add exact matches not in merged results (FTS/vector didn't find them)
+    // Add exact matches not in merged results — but only when no filters are active.
+    // When filters are set, exact matches that passed the filter are already in merged
+    // (via vector/FTS which apply the filter). Adding unfiltered exact matches would
+    // bypass the user's explicit tag/sideEffect filter request.
+    const hasFilters = (tagsFilter?.length ?? 0) > 0 || (sideEffectsFilter?.length ?? 0) > 0;
     const mergedIds = new Set(merged.map(r => r.id));
-    const exactToAdd: SearchResult[] = exactMatches
+    const exactToAdd: SearchResult[] = hasFilters ? [] : exactMatches
       .filter(r => !mergedIds.has(r.id))
       .map(r => ({
         id: r.id,

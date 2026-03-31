@@ -44,7 +44,7 @@ export function normalizeParamCount(record: FunctionRecord): number {
   return clamp(count / 4, 0, 1);
 }
 
-function countParamsFromSignature(signature: string): number {
+export function countParamsFromSignature(signature: string): number {
   const openIdx = signature.indexOf("(");
   if (openIdx === -1) return 0;
   // Find matching close paren (handles nested generics)
