@@ -76,6 +76,21 @@ export async function handleModuleSummary(
   });
 }
 
+const TEST_PATH_PATTERNS = [
+  // Directory-based (all languages)
+  /\/test\//i, /\/tests\//i, /\/__tests__\//i, /\/__test__\//i, /\/spec\//i,
+  // C# test project convention: MyProject.Tests/
+  /\.Tests\//,
+  // File suffix: FooTest.java, foo.test.ts, foo.spec.js, foo_test.go, foo_test.py
+  /Test\.\w+$/, /\.test\.\w+$/, /\.spec\.\w+$/, /_test\.\w+$/,
+  // Python prefix: test_foo.py
+  /\/test_[^/]+\.py$/,
+];
+
+function isTestFile(filePath: string): boolean {
+  return TEST_PATH_PATTERNS.some(p => p.test(filePath));
+}
+
 function buildModuleOutput(
   module: string,
   records: FunctionRecord[],
@@ -87,6 +102,17 @@ function buildModuleOutput(
   let filtered = file
     ? records.filter(r => r.filePath.endsWith(file))
     : records;
+
+  // Exclude test files by default — agent rarely needs tests when exploring a module's API.
+  // If the module path itself is a test directory, keep them (user explicitly asked for tests).
+  // Prepend "/" so top-level module names like "test" or "tests" match directory patterns.
+  const moduleIsTestDir = isTestFile("/" + module + "/x");
+  let testFilesExcluded = 0;
+  if (!moduleIsTestDir && !file) {
+    const before = filtered.length;
+    filtered = filtered.filter(r => !isTestFile(r.filePath));
+    testFilesExcluded = before - filtered.length;
+  }
 
   // Determine detail level
   const detail = requestedDetail || "auto";
@@ -110,21 +136,29 @@ function buildModuleOutput(
     mode = detail;
   }
 
-  if (mode === "files_only") return buildFilesOnly(module, filtered);
-  if (mode === "compact") return buildCompact(module, filtered);
-  return buildFull(module, filtered);
+  const result = mode === "files_only" ? buildFilesOnly(module, filtered)
+    : mode === "compact" ? buildCompact(module, filtered)
+    : buildFull(module, filtered);
+
+  if (testFilesExcluded > 0) {
+    (result as any).test_files_excluded = testFilesExcluded;
+  }
+
+  return result;
 }
 
 // === Output builders ===
 
 function buildFilesOnly(module: string, records: FunctionRecord[]) {
-  const fileMap = new Map<string, { classes: string[]; functions: number }>();
+  const fileMap = new Map<string, { classes: string[]; functions: number; methods: number }>();
 
   for (const r of records) {
-    if (!fileMap.has(r.filePath)) fileMap.set(r.filePath, { classes: [], functions: 0 });
+    if (!fileMap.has(r.filePath)) fileMap.set(r.filePath, { classes: [], functions: 0, methods: 0 });
     const entry = fileMap.get(r.filePath)!;
     if (r.kind === "class" || r.kind === "interface") {
       entry.classes.push(r.name);
+    } else if (r.kind === "method") {
+      entry.methods++;
     } else {
       entry.functions++;
     }
@@ -137,6 +171,7 @@ function buildFilesOnly(module: string, records: FunctionRecord[]) {
     files: Array.from(fileMap.entries()).map(([file, info]) => ({
       file,
       ...(info.classes.length > 0 ? { classes: info.classes } : {}),
+      ...(info.methods > 0 ? { methods: info.methods } : {}),
       functions: info.functions,
     })),
   };
