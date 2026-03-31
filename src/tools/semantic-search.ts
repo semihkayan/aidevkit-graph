@@ -88,26 +88,27 @@ export async function handleSemanticSearch(
   // Enrich ALL candidates — density adjustment needs the full pool to rerank properly.
   // Premature .slice(topK) here would let constructors/accessors occupy slots that
   // density would eliminate, cutting off better results at lower raw positions.
-  const enriched = candidates.map(r => {
-    const record = ws.index.getById(r.id);
-    // Auto-summary: use docstring summary if available, else build from signature
-    let summary = r.summary;
-    if (!summary && record) {
-      summary = buildAutoSummary(record);
-    }
-    return {
-      function: r.name,
-      file: r.filePath,
-      module: r.module,
-      signature: r.signature,
-      summary,
-      tags: r.tags,
-      score: r.score,
-      line_start: record?.lineStart,
-      line_end: record?.lineEnd,
-      record, // Temporarily attach for relevance adjustments
-    };
-  });
+  let desyncCount = 0;
+  const enriched = candidates
+    .map(r => {
+      const record = ws.index.getById(r.id);
+      if (!record) { desyncCount++; return null; }
+      // Auto-summary: use docstring summary if available, else build from signature
+      const summary = r.summary || buildAutoSummary(record);
+      return {
+        function: r.name,
+        file: r.filePath,
+        module: r.module,
+        signature: r.signature,
+        summary,
+        tags: r.tags,
+        score: r.score,
+        line_start: record.lineStart,
+        line_end: record.lineEnd,
+        record, // Temporarily attach for relevance adjustments
+      };
+    })
+    .filter((r): r is NonNullable<typeof r> => r !== null);
 
   // Apply information density adjustments: demote low-info functions, boost high-info ones
   applyDensityAdjustment(enriched, ws, ctx.config);
@@ -138,11 +139,18 @@ export async function handleSemanticSearch(
     search_mode: searchMode,
   };
 
+  const warnings: string[] = [];
   if (!embeddingAvailable) {
-    response.warning = "Ollama unavailable. Run: ollama serve && ollama pull " + ctx.config.embedding.model;
+    warnings.push("Ollama unavailable. Run: ollama serve && ollama pull " + ctx.config.embedding.model);
   }
   if (vectorCount === 0) {
-    response.warning = (response.warning || "") + " No vectors indexed. Run reindex with Ollama running.";
+    warnings.push("No vectors indexed. Run reindex with Ollama running.");
+  }
+  if (desyncCount > 0) {
+    warnings.push(`${desyncCount} results skipped (index/vector desync). Run reindex to fix.`);
+  }
+  if (warnings.length > 0) {
+    response.warning = warnings.join(" ");
   }
 
   return textResponse(response);
