@@ -31,12 +31,18 @@ export async function handleModuleSummary(
       .filter(m => {
         const ml = m.toLowerCase();
         if (ml.includes(query) || query.includes(ml)) return true;
-        if (Math.abs(ml.length - query.length) <= 1) {
-          let diff = 0;
-          for (let i = 0; i < Math.max(ml.length, query.length); i++) {
-            if (ml[i] !== query[i]) diff++;
+        // Also check each path segment (e.g., "strek" fuzzy-matches "streak" in "com/wordbox/streak/...")
+        const segments = ml.split("/");
+        for (const seg of segments) {
+          if (seg.includes(query) || query.includes(seg)) return true;
+          // Levenshtein-like: allow up to 2 char diffs for similar-length segments
+          if (Math.abs(seg.length - query.length) <= 1) {
+            let diff = 0;
+            for (let i = 0; i < Math.max(seg.length, query.length); i++) {
+              if (seg[i] !== query[i]) diff++;
+            }
+            if (diff <= 2) return true;
           }
-          if (diff <= 2) return true;
         }
         return false;
       })
