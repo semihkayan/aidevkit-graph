@@ -40,9 +40,48 @@ const data = await h.call("get_index_status", { workspace: "wordbox-api" });
 await h.close(); // always close
 ```
 
-## Tool names
+## Tool params & response shapes
 
-`semantic_search` · `get_module_summary` · `get_function_source` · `get_dependencies` · `get_impact_analysis` · `get_stale_docstrings` · `reindex` · `get_index_status`
+### `semantic_search`
+**Params:** `query` (string, required), `workspace?`, `scope?`, `top_k?` (default 10), `tags_filter?` (string[]), `side_effects_filter?` (string[])
+**Response:** `{ results, total_indexed, search_mode, warning? }`
+**Each result:** `{ function, file, module, signature, summary, tags, score, line_start, line_end, workspace? }`
+
+### `get_module_summary`
+**Params:** `module` (string, required), `workspace?`, `file?`, `detail?` ("auto"|"full"|"compact"|"files_only")
+**Response:** `{ module, mode, total, files, test_files_excluded?, workspace? }` — or `{ module, workspaces[] }` for multi-workspace
+**Error:** `{ error: "MODULE_NOT_FOUND", message, suggestion? }`
+
+### `get_function_source`
+**Params:** `function` (string, required), `workspace?`, `module?`, `context_lines?` (default 0)
+**Single match:** `{ function, file, workspace?, language, line_start, line_end, source, context_before?, context_after?, class_context? }`
+**Multi match:** `{ matches[], note }`
+**Error:** `{ error: "FUNCTION_NOT_FOUND", message, suggestion? }`
+
+### `get_dependencies`
+**Params:** `function` (string, required), `workspace?`, `module?`
+**Response:** `{ function, file, workspace?, calls[], ast_only?, docstring_only?, unresolved?, caveat }`
+**Each call:** `{ target, file, line, source, resolved, note? }`
+**Error:** `{ error: "FUNCTION_NOT_FOUND", message, suggestion? }`
+
+### `get_impact_analysis`
+**Params:** `function` (string, required), `workspace?`, `module?`, `change_type?` ("signature"|"behavior"|"removal")
+**Response:** `{ function, file, workspace?, change_type, call_impact[], type_impact[], total_affected, caveat }`
+**Error:** `{ error: "FUNCTION_NOT_FOUND", message, suggestion? }`
+
+### `get_stale_docstrings`
+**Params:** `workspace?`, `scope?`, `check_type?` ("all"|"deps"|"tags"|"missing"), `top_k?`
+**Response:** `{ total_issues, by_severity: { warning, info }, missing_docstrings_summary?, issues[], note? }`
+**Each issue:** `{ function, file, line, issue, severity, workspace? }`
+
+### `reindex`
+**Params:** `workspace?`, `files?` (string[]), `force?` (default false)
+**Response:** `{ workspace?, status, mode, ast_index: { files, functions, classes }, embedded, vector_store_rows, elapsed_ms }`
+
+### `get_index_status`
+**Params:** `workspace?`
+**Single:** `{ status, workspace, ast_index, vector_store, call_graph, type_graph, embedding_available, docstring_coverage, languages }`
+**Multi:** `{ status, workspaces[], embedding_available, model }`
 
 ## assert
 
