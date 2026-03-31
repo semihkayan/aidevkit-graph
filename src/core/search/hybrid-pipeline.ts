@@ -32,7 +32,7 @@ export class HybridSearchPipeline implements ISearchPipeline {
   ): Promise<SearchResult[]> {
     const { topK, scope, tagsFilter, sideEffectsFilter } = options;
     const filter: SearchFilter = { scope, tags: tagsFilter, sideEffects: sideEffectsFilter };
-    const fetchK = topK * 2;
+    const fetchK = topK * 3;
 
     // Step 1: Exact name match fast path
     const exactMatches = await this.vectorDb.searchByExactName(query.text, scope);

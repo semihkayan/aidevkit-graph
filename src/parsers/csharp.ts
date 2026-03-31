@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
-import type { RawFunctionInfo, RawCallInfo, RawImportInfo, RawTypeRelationship } from "../types/index.js";
+import type { RawFunctionInfo, RawCallInfo, RawImportInfo, RawTypeRelationship, StructuralHints } from "../types/index.js";
 import type { TreeSitterLanguageConfig } from "./tree-sitter-parser.js";
 import { walkNodes, findParent, type SyntaxNode } from "./ast-utils.js";
 
@@ -61,6 +61,8 @@ function extractFunctions(rootNode: SyntaxNode, _filePath: string): RawFunctionI
     const fullName = className ? `${className}.${name}` : name;
     const isAsync = node.children.some((c: SyntaxNode) => c.text === "async");
 
+    const isAbstract = node.children.some((c: SyntaxNode) => c.type === "modifier" && c.text === "abstract");
+
     results.push({
       name: fullName, kind: "method",
       signature: `${retType} ${name}${params}`,
@@ -68,6 +70,7 @@ function extractFunctions(rootNode: SyntaxNode, _filePath: string): RawFunctionI
       visibility: getVisibility(node), isAsync,
       docstring: getXmlDoc(node) || undefined,
       decorators: getAttributes(node),
+      structuralHints: isAbstract ? { isAbstract: true } : undefined,
     });
   }
 
@@ -83,6 +86,7 @@ function extractFunctions(rootNode: SyntaxNode, _filePath: string): RawFunctionI
       visibility: getVisibility(node), isAsync: false,
       docstring: getXmlDoc(node) || undefined,
       decorators: getAttributes(node),
+      structuralHints: { isConstructor: true },
     });
   }
 

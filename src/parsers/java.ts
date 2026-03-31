@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
-import type { RawFunctionInfo, RawCallInfo, RawImportInfo, RawTypeRelationship } from "../types/index.js";
+import type { RawFunctionInfo, RawCallInfo, RawImportInfo, RawTypeRelationship, StructuralHints } from "../types/index.js";
 import type { TreeSitterLanguageConfig } from "./tree-sitter-parser.js";
 import { walkNodes, findParent, type SyntaxNode } from "./ast-utils.js";
 
@@ -70,6 +70,10 @@ function extractFunctions(rootNode: SyntaxNode, _filePath: string): RawFunctionI
     const className = classNode?.childForFieldName("name")?.text;
     const fullName = className ? `${className}.${name}` : name;
 
+    // Detect abstract modifier
+    const modifiersNode = node.children.find((c: SyntaxNode) => c.type === "modifiers");
+    const isAbstract = modifiersNode?.children?.some((c: SyntaxNode) => c.text === "abstract") ?? false;
+
     results.push({
       name: fullName,
       kind: "method",
@@ -80,6 +84,7 @@ function extractFunctions(rootNode: SyntaxNode, _filePath: string): RawFunctionI
       isAsync: false,
       docstring: getJavadoc(node) || undefined,
       decorators: getAnnotations(node),
+      structuralHints: isAbstract ? { isAbstract: true } : undefined,
     });
   }
 
@@ -98,6 +103,7 @@ function extractFunctions(rootNode: SyntaxNode, _filePath: string): RawFunctionI
       isAsync: false,
       docstring: getJavadoc(node) || undefined,
       decorators: getAnnotations(node),
+      structuralHints: { isConstructor: true },
     });
   }
 

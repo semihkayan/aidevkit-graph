@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
-import type { RawFunctionInfo, RawCallInfo, RawImportInfo, RawTypeRelationship } from "../types/index.js";
+import type { RawFunctionInfo, RawCallInfo, RawImportInfo, RawTypeRelationship, StructuralHints } from "../types/index.js";
 import type { TreeSitterLanguageConfig } from "./tree-sitter-parser.js";
 import { walkNodes, findParent, type SyntaxNode } from "./ast-utils.js";
 
@@ -216,6 +216,15 @@ function extractFunctions(rootNode: SyntaxNode, _filePath: string): RawFunctionI
       methodNames.push(methodName);
 
       const fullName = `${className}.${methodName}`;
+
+      // Detect structural hints from AST
+      const hints: StructuralHints = {};
+      if (method.children.some((c: SyntaxNode) => c.type === "get" || c.type === "set")) {
+        hints.propertyAccess = true;
+      }
+      if (methodName === "constructor") hints.isConstructor = true;
+      if (method.children.some((c: SyntaxNode) => c.type === "abstract")) hints.isAbstract = true;
+
       results.push({
         name: fullName,
         kind: "method",
@@ -227,6 +236,7 @@ function extractFunctions(rootNode: SyntaxNode, _filePath: string): RawFunctionI
         docstring: getJSDoc(method) || undefined,
         decorators: getTsDecorators(method),
         paramTypes: extractParamTypes(method),
+        structuralHints: Object.keys(hints).length > 0 ? hints : undefined,
       });
     }
 

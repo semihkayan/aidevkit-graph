@@ -67,13 +67,12 @@ export async function handleSemanticSearch(
     return textResponse({ results: [], total_indexed: 0, search_mode: "skipped", note: "Query too short. Use at least 2 characters." });
   }
 
-  // Fetch extra candidates: density adjustment eliminates constructors/accessors/tests,
-  // so we need a larger pool to ensure enough quality results survive.
-  const fetchK = topK * 3;
+  // Over-fetch for density adjustment: constructors/accessors/tests get eliminated,
+  // so we need a larger pool. Pipeline internally also over-fetches *2 for RRF merge.
   const rawResults = await ws.search.search(
     { text: query },
     {
-      topK: fetchK,
+      topK: topK * 3,
       scope: args.scope,
       tagsFilter: args.tags_filter,
       sideEffectsFilter: args.side_effects_filter,

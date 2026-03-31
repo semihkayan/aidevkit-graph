@@ -7,7 +7,7 @@ import type { FunctionRecord } from "../types/index.js";
 
 // Bump when parser behavior changes (e.g., visibility detection, new fields).
 // Old-version cache files are skipped on load → re-parsed by refreshStale → saved with new version.
-const AST_CACHE_VERSION = 3;
+const AST_CACHE_VERSION = 4;
 
 export class JsonFileRecordStore implements IRecordStore {
   constructor(private cacheDir: string) {}

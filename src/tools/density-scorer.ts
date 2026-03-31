@@ -110,8 +110,13 @@ export function computeDensityScore(
   callGraphEntry: CallGraphEntry | undefined,
   weights: DensityWeights,
 ): number {
+  // Abstract methods have no body by design — neutral score instead of penalty
+  const bodySize = record.structuralHints?.isAbstract
+    ? 0.5
+    : normalizeBodySize(record);
+
   return (
-    weights.bodySize * normalizeBodySize(record) +
+    weights.bodySize * bodySize +
     weights.docstring * normalizeDocstring(record) +
     weights.docstringRichness * normalizeDocstringRichness(record) +
     weights.paramCount * normalizeParamCount(record) +
@@ -125,8 +130,8 @@ export function computeDensityScore(
 
 /** Constructors declare dependencies but don't implement behavior */
 function isConstructor(record: FunctionRecord): boolean {
+  if (record.structuralHints?.isConstructor) return true;
   const name = record.name.split(".").pop() || record.name;
-  // All parsers produce "ClassName.constructor" or "__init__" (Python)
   return name === "constructor" || name === "__init__";
 }
 
@@ -135,23 +140,33 @@ function isConstructor(record: FunctionRecord): boolean {
 const NON_ACCESSOR_KINDS = new Set(["class", "interface", "enum", "struct", "record"]);
 
 /**
- * Detect getter/setter methods using purely structural signals:
- * - Body ≤ 4 lines (getters/setters are 1-3 lines)
- * - 0-1 params (getters=0, setters=1; business methods have 2+)
- * - 0 resolved outgoing calls (accessors don't call project code)
+ * Detect getter/setter methods using parser hints + structural fallback:
+ * 1. Parser-confirmed: propertyAccess hint + small body (≤3 lines)
+ * 2. Heuristic fallback: body ≤ 4 lines, 0-1 params, 0 total calls
  */
 export function isAccessor(record: FunctionRecord, callEntry: CallGraphEntry | undefined): boolean {
   if (NON_ACCESSOR_KINDS.has(record.kind)) return false;
   if (isConstructor(record)) return false;
+  if (record.structuralHints?.isAbstract) return false; // No body by design
 
   const bodyLines = record.lineEnd - record.lineStart + 1;
+
+  // Parser-confirmed property access: trust it, but require small body
+  // (@property with 10-line computation is NOT a trivial accessor)
+  if (record.structuralHints?.propertyAccess) {
+    return bodyLines <= 3;
+  }
+
+  // Heuristic fallback for languages without accessor syntax (Go, Java, Rust)
   if (bodyLines > 4) return false;
 
   const paramCount = record.paramTypes?.length ?? countParamsFromSignature(record.signature);
   if (paramCount > 1) return false;
 
-  const resolvedCalls = callEntry?.calls.filter(c => c.resolvedId).length ?? 0;
-  if (resolvedCalls > 0) return false;
+  // Count ALL calls (resolved + unresolved), not just resolved.
+  // Unresolved calls like this.field.method() still indicate real behavior.
+  const totalCalls = callEntry?.calls.length ?? 0;
+  if (totalCalls > 0) return false;
 
   return true;
 }

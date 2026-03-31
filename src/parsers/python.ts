@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import type { RawFunctionInfo, RawCallInfo, RawImportInfo, RawTypeRelationship } from "../types/index.js";
+import type { RawFunctionInfo, RawCallInfo, RawImportInfo, RawTypeRelationship, StructuralHints } from "../types/index.js";
 import type { TreeSitterLanguageConfig } from "./tree-sitter-parser.js";
 import { walkNodes, findParent, type SyntaxNode } from "./ast-utils.js";
 
@@ -68,6 +68,15 @@ function extractFunctions(rootNode: SyntaxNode, _filePath: string): RawFunctionI
       ? classParent.childForFieldName("name")?.text
       : null;
 
+    // Detect structural hints from decorators
+    const decorators = getDecorators(node);
+    const hints: StructuralHints = {};
+    if (decorators.some(d => d === "@property" || d.endsWith(".setter"))) {
+      hints.propertyAccess = true;
+    }
+    if (decorators.some(d => d === "@abstractmethod")) hints.isAbstract = true;
+    if (name === "__init__") hints.isConstructor = true;
+
     results.push({
       name: className ? `${className}.${name}` : name,
       kind: isMethod ? "method" : "function",
@@ -76,8 +85,9 @@ function extractFunctions(rootNode: SyntaxNode, _filePath: string): RawFunctionI
       lineEnd: node.endPosition.row + 1,
       visibility: getVisibility(name),
       isAsync: isAsync(node),
-      decorators: getDecorators(node),
+      decorators,
       docstring: getDocstring(node) || undefined,
+      structuralHints: Object.keys(hints).length > 0 ? hints : undefined,
     });
   }
 

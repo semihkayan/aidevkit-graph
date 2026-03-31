@@ -401,6 +401,7 @@ export class FunctionIndex implements IFunctionIndexReader, IFunctionIndexWriter
         usesTypes: [],
       } : undefined,
       paramTypes: raw.paramTypes,
+      structuralHints: raw.structuralHints,
       fileHash: hash,
       lastIndexedAt: Date.now(),
     };

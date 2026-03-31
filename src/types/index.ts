@@ -38,9 +38,18 @@ export interface FunctionRecord {
   // Parameter types (for type-aware call resolution)
   paramTypes?: Array<{ name: string; type: string }>;
 
+  // Parser-detected structural classification (overrides heuristics in density scorer)
+  structuralHints?: StructuralHints;
+
   // Metadata
   fileHash: string;
   lastIndexedAt: number;
+}
+
+export interface StructuralHints {
+  isConstructor?: boolean;   // AST-confirmed: constructor_declaration, __init__
+  isAbstract?: boolean;      // AST-confirmed: abstract keyword, @abstractmethod
+  propertyAccess?: boolean;  // AST-confirmed: get/set keyword, @property, C# property
 }
 
 export interface ParsedDocstring {
@@ -151,6 +160,7 @@ export interface RawFunctionInfo {
   docstring?: string;
   classInfo?: { inherits: string[]; methods: string[] };
   paramTypes?: Array<{ name: string; type: string }>;
+  structuralHints?: StructuralHints;
 }
 
 export interface RawCallInfo {
