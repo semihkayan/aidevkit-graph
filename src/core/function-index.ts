@@ -9,15 +9,7 @@ import type {
 import type { FunctionRecord } from "../types/index.js";
 import { readFile, computeModule, detectLanguage } from "../utils/file-utils.js";
 import { globSourceFiles } from "../utils/file-utils.js";
-
-function decomposeIdentifier(name: string): string[] {
-  return name
-    .replace(/([a-z])([A-Z])/g, "$1\0$2")
-    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1\0$2")
-    .replace(/_/g, "\0")
-    .split("\0")
-    .filter(s => s.length > 0);
-}
+import { decomposeIdentifier } from "../utils/string-similarity.js";
 
 /**
  * Detect whether a file contains test code using structural signals from parser metadata:
@@ -217,6 +209,10 @@ export class FunctionIndex implements IFunctionIndexReader, IFunctionIndexWriter
     }
 
     return results;
+  }
+
+  getAllNames(): string[] {
+    return Array.from(this.nameIndex.keys());
   }
 
   getAllModules(): string[] {

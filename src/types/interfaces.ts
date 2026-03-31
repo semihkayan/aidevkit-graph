@@ -15,6 +15,7 @@ export interface IFunctionIndexReader {
   findByExactName(name: string): FunctionRecord[];
   findByClassAware(query: string): FunctionRecord[];
   getAllModules(): string[];
+  getAllNames(): string[];
   getAllFilePaths(): string[];
   getFileRecordIds(filePath: string): string[];
   getFileHashes(): Map<string, string>;

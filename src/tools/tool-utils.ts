@@ -1,5 +1,6 @@
 import type { AppContext, WorkspaceServices } from "../types/interfaces.js";
 import type { FunctionRecord } from "../types/index.js";
+import { findSimilar } from "../utils/string-similarity.js";
 
 export type ResolvedWorkspace = { ws: WorkspaceServices; wsPath: string };
 
@@ -94,19 +95,11 @@ export function resolveFunctionAcrossWorkspaces(
   }
 
   if (matches.length === 0) {
-    // Collect suggestions from all workspaces
     const allNames = new Set<string>();
     for (const { ws } of resolved.workspaces) {
-      for (const fp of ws.index.getAllFilePaths()) {
-        for (const id of ws.index.getFileRecordIds(fp)) {
-          const rec = ws.index.getById(id);
-          if (rec) allNames.add(rec.name);
-        }
-      }
+      for (const n of ws.index.getAllNames()) allNames.add(n);
     }
-    const suggestions = Array.from(allNames)
-      .filter(n => n.toLowerCase().includes(name.toLowerCase()) || name.toLowerCase().includes(n.toLowerCase()))
-      .slice(0, 5);
+    const suggestions = findSimilar(name, allNames);
 
     return {
       error: errorResponse("FUNCTION_NOT_FOUND",
@@ -186,17 +179,7 @@ export function resolveFunctionOrError(
   }
 
   if (matches.length === 0) {
-    // Suggest similar names
-    const allNames = new Set<string>();
-    for (const fp of ws.index.getAllFilePaths()) {
-      for (const id of ws.index.getFileRecordIds(fp)) {
-        const rec = ws.index.getById(id);
-        if (rec) allNames.add(rec.name);
-      }
-    }
-    const suggestions = Array.from(allNames)
-      .filter(n => n.toLowerCase().includes(name.toLowerCase()) || name.toLowerCase().includes(n.toLowerCase()))
-      .slice(0, 5);
+    const suggestions = findSimilar(name, ws.index.getAllNames());
 
     return {
       error: errorResponse("FUNCTION_NOT_FOUND",

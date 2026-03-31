@@ -1,6 +1,7 @@
 import type { AppContext } from "../types/interfaces.js";
 import type { FunctionRecord } from "../types/index.js";
 import { resolveWorkspaces, textResponse, errorResponse } from "./tool-utils.js";
+import { findSimilar } from "../utils/string-similarity.js";
 
 export async function handleModuleSummary(
   args: { module: string; workspace?: string; file?: string; detail?: string },
@@ -26,27 +27,7 @@ export async function handleModuleSummary(
         if (m.length > 0) allModules.add(m);
       }
     }
-    const query = args.module.toLowerCase();
-    const suggestions = Array.from(allModules)
-      .filter(m => {
-        const ml = m.toLowerCase();
-        if (ml.includes(query) || query.includes(ml)) return true;
-        // Also check each path segment (e.g., "strek" fuzzy-matches "streak" in "com/wordbox/streak/...")
-        const segments = ml.split("/");
-        for (const seg of segments) {
-          if (seg.includes(query) || query.includes(seg)) return true;
-          // Levenshtein-like: allow up to 2 char diffs for similar-length segments
-          if (Math.abs(seg.length - query.length) <= 1) {
-            let diff = 0;
-            for (let i = 0; i < Math.max(seg.length, query.length); i++) {
-              if (seg[i] !== query[i]) diff++;
-            }
-            if (diff <= 2) return true;
-          }
-        }
-        return false;
-      })
-      .slice(0, 5);
+    const suggestions = findSimilar(args.module, allModules, { mode: "path" });
 
     return errorResponse("MODULE_NOT_FOUND",
       `Module '${args.module}' not found${resolved.workspaces.length > 1 ? " in any workspace" : ""}.`,
