@@ -463,6 +463,15 @@ export class FunctionIndex implements IFunctionIndexReader, IFunctionIndexWriter
     this.records.delete(id);
   }
 
+  clear(): void {
+    this.records.clear();
+    this.fileIndex.clear();
+    this.moduleIndex.clear();
+    this.tagIndex.clear();
+    this.nameIndex.clear();
+    this.fileHashes.clear();
+  }
+
   private toFunctionRecord(raw: import("../types/index.js").RawFunctionInfo, filePath: string, hash: string): FunctionRecord {
     const docstring = raw.docstring
       ? this.docstringParser.parse(raw.docstring, raw.kind === "class" ? "class" : "function")

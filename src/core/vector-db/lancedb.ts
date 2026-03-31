@@ -146,7 +146,8 @@ export class LanceDBStore implements IVectorDatabase, IFullTextSearch {
   }
 
   async close(): Promise<void> {
-    // LanceDB connections don't need explicit close
+    this.table = null;
+    this.db = null!;
   }
 
   // === Private ===

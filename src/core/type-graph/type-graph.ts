@@ -252,4 +252,8 @@ export class TypeGraphManager implements ITypeGraphReader, ITypeGraphWriter {
     }
     return node;
   }
+
+  clear(): void {
+    this.graph.clear();
+  }
 }

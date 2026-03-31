@@ -400,4 +400,8 @@ export class CallGraphManager implements ICallGraphReader, ICallGraphWriter {
       }
     }
   }
+
+  clear(): void {
+    this.graph.clear();
+  }
 }

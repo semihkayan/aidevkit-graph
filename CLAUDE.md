@@ -104,6 +104,12 @@ export async function handleToolName(args: { ... }, ctx: AppContext) {
 3. Add to `AppContext` or `WorkspaceServices` in `interfaces.ts`
 4. Wire concrete class in `src/services.ts`
 
+## Testing
+
+`TestHarness` (`src/test-harness.ts`) — test MCP tools against any project. Three modes: `testAll()` runs 45 built-in generic tests, `run([...])` executes agent-defined cases in bulk, `call()` for single manual calls. `close()` releases memory (clear all index/graph maps).
+
+`initializeWorkspaces()` in `services.ts` — shared init logic between MCP server and test harness. `embed` option controls whether embedding runs (harness skips it for speed).
+
 ## Gotchas
 
 - **tree-sitter CJS in ESM** — use `createRequire(import.meta.url)`, never dynamic `import()` for tree-sitter

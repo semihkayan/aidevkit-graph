@@ -3,8 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import path from "node:path";
 import { writeFileSync, unlinkSync, mkdirSync } from "node:fs";
-import { createServices } from "./services.js";
-import { reembedFunctions } from "./core/reembed.js";
+import { createServices, initializeWorkspaces } from "./services.js";
 import { logger } from "./utils/logger.js";
 
 // Schemas
@@ -94,86 +93,11 @@ async function main() {
   await server.connect(transport);
   logger.info("MCP server connected via stdio");
 
-  // Initialize index AFTER connection — heavy work in background
-  for (const wsPath of services.workspacePaths) {
-    const ws = services.resolveWorkspace(wsPath);
-    await ws.indexWriter.loadFromDisk();
-
-    const stats = ws.index.getStats();
-    let staleIds: string[] = [];
-    let freshBuild = false;
-    if (stats.files === 0) {
-      logger.info({ workspace: wsPath }, "Empty index, building...");
-      await ws.indexWriter.buildFull(ws.projectRoot);
-      await ws.indexWriter.saveToDisk();
-      freshBuild = true;
-      const newStats = ws.index.getStats();
-      logger.info({ workspace: wsPath, ...newStats }, "Index built");
-    } else {
-      logger.info({ workspace: wsPath, ...stats }, "Index loaded from cache");
-      // Check for files changed while server was offline
-      staleIds = await ws.indexWriter.refreshStale(ws.projectRoot);
-      if (staleIds.length > 0) {
-        await ws.indexWriter.saveToDisk();
-        logger.info({ workspace: wsPath, updated: staleIds.length }, "Stale files refreshed");
-      }
-    }
-
-    // Initialize vector DB
-    const lancePath = path.join(services.config.projectRoot, ".code-context", "lance");
-    const tableName = wsPath === "." ? "functions" : `${wsPath}_functions`;
-    await ws.vectorDb.initialize(lancePath, tableName);
-    const vectorCount = await ws.vectorDb.countRows();
-    logger.info({ workspace: wsPath, vectorCount }, "Vector DB initialized");
-
-    // Graphs BEFORE embedding — call graph data enriches embedding chunks
-    const graphCacheDir = wsPath === "."
-      ? path.join(services.config.projectRoot, ".code-context")
-      : path.join(services.config.projectRoot, ".code-context", wsPath);
-
-    // Type graph FIRST — call graph uses it for interface-based resolution
-    const tgLoaded = await ws.typeGraphWriter.loadFromDisk(graphCacheDir, ws.index);
-    if (!tgLoaded) {
-      await ws.typeGraphWriter.build(ws.index, services.parsers, ws.projectRoot);
-      await ws.typeGraphWriter.saveToDisk(graphCacheDir, ws.index);
-    }
-
-    const cgLoaded = await ws.callGraphWriter.loadFromDisk(graphCacheDir, ws.index);
-    if (!cgLoaded) {
-      await ws.callGraphWriter.build(ws.index, ws.projectRoot);
-      await ws.callGraphWriter.saveToDisk(graphCacheDir, ws.index);
-    }
-
-    const cgStats = ws.callGraph.getStats();
-    const tgStats = ws.typeGraph.getStats();
-    logger.info({ workspace: wsPath, ...cgStats, ...tgStats, fromCache: cgLoaded && tgLoaded },
-      cgLoaded && tgLoaded ? "Graphs loaded from cache" : "Graphs built");
-
-    // Embed — now has call graph available for chunk enrichment
-    // freshBuild: after cache version bump, old vectors are stale — rebuild all
-    if (services.embeddingAvailable && (vectorCount === 0 || freshBuild)) {
-      logger.info({ workspace: wsPath }, "Embedding all functions...");
-      const allIds = ws.index.getAllFilePaths().flatMap(fp => ws.index.getFileRecordIds(fp));
-      await reembedFunctions(allIds, ws.index, services.embedding, ws.vectorDb, services.config, ws.callGraph);
-      const newCount = await ws.vectorDb.countRows();
-      logger.info({ workspace: wsPath, embedded: newCount }, "Embedding complete");
-    } else if (services.embeddingAvailable && staleIds.length > 0) {
-      // Re-embed stale functions + clean orphan vectors for deleted ones
-      const deletedIds = staleIds.filter(id => !ws.index.getById(id));
-      const changedIds = staleIds.filter(id => ws.index.getById(id));
-      if (deletedIds.length > 0) {
-        await ws.vectorDb.deleteByIds(deletedIds);
-      }
-      if (changedIds.length > 0) {
-        await reembedFunctions(changedIds, ws.index, services.embedding, ws.vectorDb, services.config, ws.callGraph);
-      }
-      logger.info({ workspace: wsPath, reembedded: changedIds.length, deleted: deletedIds.length }, "Stale vectors updated");
-    }
-  }
+  // Initialize all workspaces — heavy work after MCP connection is live
+  await initializeWorkspaces(services);
 
   // Start file watcher — auto-reindex on file changes
   services.watcher.start();
-  services.ready = true;
   logger.info("Initialization complete.");
 }
 
