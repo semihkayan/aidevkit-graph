@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { stat } from "node:fs/promises";
 import path from "node:path";
 import ignore from "ignore";
 import type {
@@ -47,6 +48,7 @@ export class FunctionIndex implements IFunctionIndexReader, IFunctionIndexWriter
   private tagIndex = new Map<string, Set<string>>();    // tag → Set<record ids>
   private nameIndex = new Map<string, string[]>();      // name → [record ids] (for fast lookup)
   private fileHashes = new Map<string, string>();       // filePath → SHA-256
+  private fileMtimes = new Map<string, number>();       // filePath → mtimeMs
 
   constructor(
     private parsers: ILanguageParser[],
@@ -266,7 +268,7 @@ export class FunctionIndex implements IFunctionIndexReader, IFunctionIndexWriter
   // === IFunctionIndexWriter ===
 
   async loadFromDisk(): Promise<void> {
-    const { records, hashes } = await this.recordStore.loadAll();
+    const { records, hashes, mtimes } = await this.recordStore.loadAll();
 
     // Filter out records from ignored files (e.g., dist/ cached before ignore was added)
     const ig = ignore.default().add(this.config.parser.ignore);
@@ -302,6 +304,7 @@ export class FunctionIndex implements IFunctionIndexReader, IFunctionIndexWriter
     }
 
     this.fileHashes = hashes;
+    this.fileMtimes = mtimes;
   }
 
   async saveToDisk(): Promise<void> {
@@ -312,7 +315,8 @@ export class FunctionIndex implements IFunctionIndexReader, IFunctionIndexWriter
       activeFiles.add(relPath);
       const records = ids.map(id => this.records.get(id)!).filter(Boolean);
       const hash = this.fileHashes.get(relPath) || "";
-      saves.push(this.recordStore.saveFile(relPath, records, hash));
+      const mtime = this.fileMtimes.get(relPath) || 0;
+      saves.push(this.recordStore.saveFile(relPath, records, hash, mtime));
     }
     await Promise.all(saves);
 
@@ -338,6 +342,7 @@ export class FunctionIndex implements IFunctionIndexReader, IFunctionIndexWriter
         const oldIds = this.fileIndex.get(relPath) || [];
         for (const id of oldIds) this.removeRecord(id);
         this.fileHashes.delete(relPath);
+        this.fileMtimes.delete(relPath);
         await this.recordStore.deleteFile(relPath);
         changedFunctionIds.push(...oldIds);
         continue;
@@ -378,19 +383,30 @@ export class FunctionIndex implements IFunctionIndexReader, IFunctionIndexWriter
         changedFunctionIds.push(record.id);
       }
 
-      // Always store hashes by relative path
+      // Always store hashes and mtimes by relative path
       this.fileHashes.set(relPath, newHash);
+      try {
+        const fileStat = await stat(absPath);
+        this.fileMtimes.set(relPath, fileStat.mtimeMs);
+      } catch {
+        // stat may fail if file was just deleted — mtime is best-effort
+      }
     }
 
     return changedFunctionIds;
   }
 
   async refreshStale(projectRoot: string): Promise<string[]> {
-    const changedFiles = await this.stalenessChecker.getChangedFiles(
-      projectRoot, this.fileHashes
+    const { changed, mtimes } = await this.stalenessChecker.getChangedFiles(
+      projectRoot, this.fileHashes, this.fileMtimes
     );
-    if (changedFiles.length === 0) return [];
-    return this.updateFiles(changedFiles);
+    // Update mtimes for files that were stat'd (even if hash matched — mtime was stale)
+    for (const [absPath, mt] of mtimes) {
+      const relPath = path.relative(projectRoot, absPath);
+      this.fileMtimes.set(relPath, mt);
+    }
+    if (changed.length === 0) return [];
+    return this.updateFiles(changed);
   }
 
   // === Private ===
@@ -470,6 +486,7 @@ export class FunctionIndex implements IFunctionIndexReader, IFunctionIndexWriter
     this.tagIndex.clear();
     this.nameIndex.clear();
     this.fileHashes.clear();
+    this.fileMtimes.clear();
   }
 
   private toFunctionRecord(raw: import("../types/index.js").RawFunctionInfo, filePath: string, hash: string): FunctionRecord {

@@ -90,7 +90,7 @@ export class TestHarness {
       ...buildModuleSummaryTests(this.ctx, discovery),
       ...buildFunctionSourceTests(discovery),
       ...buildDependencyTests(this.ctx, discovery),
-      ...buildImpactAnalysisTests(discovery),
+      ...buildImpactAnalysisTests(this.ctx, discovery),
       ...buildSemanticSearchTests(this.ctx, discovery),
       ...buildStaleDocstringTests(discovery),
       ...buildReindexTests(this.ctx, discovery),
@@ -105,7 +105,7 @@ export class TestHarness {
       get_module_summary: () => buildModuleSummaryTests(this.ctx, discovery),
       get_function_source: () => buildFunctionSourceTests(discovery),
       get_dependencies: () => buildDependencyTests(this.ctx, discovery),
-      get_impact_analysis: () => buildImpactAnalysisTests(discovery),
+      get_impact_analysis: () => buildImpactAnalysisTests(this.ctx, discovery),
       semantic_search: () => buildSemanticSearchTests(this.ctx, discovery),
       get_stale_docstrings: () => buildStaleDocstringTests(discovery),
       reindex: () => buildReindexTests(this.ctx, discovery),
@@ -200,16 +200,19 @@ export class TestHarness {
     const ws = this.ctx.resolveWorkspace(wsPath);
 
     const modules = ws.index.getAllModules().filter(m => m.length > 0);
-    const module = modules[0];
+    let module = modules[0];
 
     let functionName: string | undefined;
     let filePath: string | undefined;
     let functionWithDeps: string | undefined;
 
-    if (module) {
-      const recs = ws.index.getByModule(module);
+    // Search across all modules for a non-test function (first module may be test-only)
+    for (const mod of modules) {
+      if (functionName) break;
+      const recs = ws.index.getByModule(mod);
       const fn = recs.find(r => r.kind !== "class" && r.kind !== "interface" && !r.structuralHints?.isTest);
       if (fn) {
+        module = mod;
         functionName = fn.name;
         filePath = fn.filePath;
       }
@@ -229,7 +232,35 @@ export class TestHarness {
       }
     }
 
-    return { workspaces, workspace: wsPath, module, functionName, filePath, functionWithDeps, isMulti: this.ctx.isMultiWorkspace };
+    // Find a function with upstream callers (for impact analysis tests)
+    let functionWithCallers: string | undefined;
+    for (const fp of ws.index.getAllFilePaths()) {
+      if (functionWithCallers) break;
+      for (const id of ws.index.getFileRecordIds(fp)) {
+        const rec = ws.index.getById(id);
+        if (!rec || rec.kind === "class" || rec.kind === "interface" || rec.structuralHints?.isTest) continue;
+        const entry = ws.callGraph.getEntry(rec.id);
+        if (entry && entry.calledBy.length >= 3) {
+          functionWithCallers = rec.name;
+          break;
+        }
+      }
+    }
+
+    // Find an interface with implementors (for type impact tests)
+    let interfaceRecord: string | undefined;
+    for (const fp of ws.index.getAllFilePaths()) {
+      if (interfaceRecord) break;
+      for (const id of ws.index.getFileRecordIds(fp)) {
+        const rec = ws.index.getById(id);
+        if (rec?.kind === "interface" && ws.typeGraph.getImplementors(rec.name).length > 0) {
+          interfaceRecord = rec.name;
+          break;
+        }
+      }
+    }
+
+    return { workspaces, workspace: wsPath, module, functionName, filePath, functionWithDeps, functionWithCallers, interfaceRecord, isMulti: this.ctx.isMultiWorkspace };
   }
 }
 
@@ -242,6 +273,8 @@ interface DiscoveryState {
   functionName?: string;
   filePath?: string;
   functionWithDeps?: string;
+  functionWithCallers?: string;
+  interfaceRecord?: string;
   isMulti: boolean;
 }
 
@@ -261,17 +294,38 @@ function invalidWsTest(tool: string, ds: DiscoveryState, extraArgs?: Record<stri
 }
 
 function buildIndexStatusTests(ctx: AppContext, ds: DiscoveryState): TestCase[] {
-  const cases: TestCase[] = [
-    { tool: "get_index_status", label: "index_status: valid",
-      assert: d => (d?.ast_index?.files > 0 && d?.ast_index?.functions > 0) || `files=${d?.ast_index?.files} fns=${d?.ast_index?.functions}` },
-    { tool: "get_index_status", label: "index_status: has fields",
-      assert: d => (d?.languages !== undefined && d?.call_graph !== undefined && d?.type_graph !== undefined) || "missing expected fields" },
-    ...invalidWsTest("get_index_status", ds),
-  ];
+  const cases: TestCase[] = [];
+
   if (ctx.isMultiWorkspace) {
-    cases.push({ tool: "get_index_status", label: "index_status: multi-ws overview",
-      assert: d => (d?.workspaces?.length >= 2) || `expected >=2 workspaces, got ${d?.workspaces?.length}` });
+    // Multi-workspace without param → overview format (workspaces array, no top-level ast_index)
+    cases.push(
+      { tool: "get_index_status", label: "index_status: multi-ws overview",
+        assert: d => (d?.workspaces?.length >= 2) || `expected >=2 workspaces, got ${d?.workspaces?.length}` },
+      { tool: "get_index_status", label: "index_status: each ws has ast_index",
+        assert: d => {
+          for (const w of d?.workspaces ?? []) {
+            if (!(w.ast_index?.files > 0)) return `ws ${w.workspace}: files=${w.ast_index?.files}`;
+          }
+          return true;
+        } },
+    );
+    // Single workspace query → detailed format
+    cases.push(
+      { tool: "get_index_status", args: { workspace: ds.workspace }, label: "index_status: single ws valid",
+        assert: d => (d?.ast_index?.files > 0 && d?.ast_index?.functions > 0) || `files=${d?.ast_index?.files} fns=${d?.ast_index?.functions}` },
+      { tool: "get_index_status", args: { workspace: ds.workspace }, label: "index_status: single ws has fields",
+        assert: d => (d?.languages !== undefined && d?.call_graph !== undefined && d?.type_graph !== undefined) || "missing expected fields" },
+    );
+  } else {
+    cases.push(
+      { tool: "get_index_status", label: "index_status: valid",
+        assert: d => (d?.ast_index?.files > 0 && d?.ast_index?.functions > 0) || `files=${d?.ast_index?.files} fns=${d?.ast_index?.functions}` },
+      { tool: "get_index_status", label: "index_status: has fields",
+        assert: d => (d?.languages !== undefined && d?.call_graph !== undefined && d?.type_graph !== undefined) || "missing expected fields" },
+    );
   }
+
+  cases.push(...invalidWsTest("get_index_status", ds));
   return cases;
 }
 
@@ -382,18 +436,123 @@ function buildDependencyTests(ctx: AppContext, ds: DiscoveryState): TestCase[] {
   return cases;
 }
 
-function buildImpactAnalysisTests(ds: DiscoveryState): TestCase[] {
+function buildImpactAnalysisTests(ctx: AppContext, ds: DiscoveryState): TestCase[] {
   if (!ds.functionName) return [skip("impact_analysis: discover", "no function discovered")];
 
-  return [
-    { tool: "get_impact_analysis", args: { function: ds.functionName, workspace: ds.workspace },
-      label: "impact_analysis: has data",
-      assert: d => (Array.isArray(d?.call_impact) && d?.total_affected >= 0) || "missing call_impact or total_affected" },
+  const cases: TestCase[] = [
+    // Error handling
     { tool: "get_impact_analysis", args: { function: "___nonexistent___" },
-      label: "impact_analysis: not found",
+      label: "impact: not found",
       assert: d => d?.error === "FUNCTION_NOT_FOUND" || `expected FUNCTION_NOT_FOUND` },
     ...invalidWsTest("get_impact_analysis", ds, { function: ds.functionName }),
+
+    // Response structure
+    { tool: "get_impact_analysis", args: { function: ds.functionName, workspace: ds.workspace },
+      label: "impact: has caveat",
+      assert: d => typeof d?.caveat === "string" || "missing caveat" },
+    { tool: "get_impact_analysis", args: { function: ds.functionName, workspace: ds.workspace },
+      label: "impact: required fields",
+      assert: d => {
+        const required = ["function", "file", "change_type", "call_impact", "type_impact", "total_affected", "caveat"];
+        const missing = required.filter(f => d?.[f] === undefined);
+        return missing.length === 0 || `missing: ${missing.join(", ")}`;
+      } },
+    { tool: "get_impact_analysis", args: { function: ds.functionName, workspace: ds.workspace },
+      label: "impact: default change_type=behavior",
+      assert: d => d?.change_type === "behavior" || `expected behavior, got ${d?.change_type}` },
+    { tool: "get_impact_analysis", args: { function: ds.functionName, workspace: ds.workspace },
+      label: "impact: total_affected consistent",
+      assert: d => {
+        if (d?.error) return `error: ${d.error}`;
+        const callCount = d.call_impact?.length ?? 0;
+        const typeCount = (d.type_impact ?? []).reduce((s: number, t: any) => s + (t.affected?.length ?? 0), 0);
+        return d.total_affected === callCount + typeCount || `total=${d.total_affected} != call(${callCount})+type(${typeCount})`;
+      } },
   ];
+
+  // Upstream callers & change_type matrix (conditional: functionWithCallers)
+  if (ds.functionWithCallers) {
+    cases.push(
+      { tool: "get_impact_analysis", args: { function: ds.functionWithCallers, workspace: ds.workspace, change_type: "signature" },
+        label: "impact: callers → call_impact > 0",
+        assert: d => (d?.call_impact?.length > 0) || `expected callers, got ${d?.call_impact?.length}` },
+      { tool: "get_impact_analysis", args: { function: ds.functionWithCallers, workspace: ds.workspace, change_type: "signature" },
+        label: "impact: call_impact item fields",
+        assert: d => {
+          if (d?.error) return `error: ${d.error}`;
+          for (const item of d.call_impact ?? []) {
+            const fields = ["function", "file", "module", "line_start", "kind", "depth", "risk"];
+            const missing = fields.filter(f => item[f] === undefined);
+            if (missing.length > 0) return `item missing: ${missing.join(", ")}`;
+          }
+          return true;
+        } },
+      // change_type → expected depth-1 risk matrix
+      ...(([["signature", "high"], ["behavior", "medium"], ["removal", "high"]] as const).map(([ct, expectedRisk]) => ({
+        tool: "get_impact_analysis" as const,
+        args: { function: ds.functionWithCallers!, workspace: ds.workspace, change_type: ct },
+        label: `impact: ${ct} → depth-1 ${expectedRisk} risk`,
+        assert: (d: any) => {
+          if (d?.error) return `error: ${d.error}`;
+          const depth1 = (d.call_impact ?? []).filter((c: any) => c.depth === 1);
+          if (depth1.length === 0) return "no depth-1 callers";
+          const bad = depth1.filter((c: any) => c.risk !== expectedRisk);
+          return bad.length === 0 || `depth-1 should be ${expectedRisk}, got: ${bad.map((c: any) => c.risk).join(",")}`;
+        },
+      }))),
+      { tool: "get_impact_analysis", args: { function: ds.functionWithCallers, workspace: ds.workspace },
+        label: "impact: depth capped at 5",
+        assert: d => {
+          if (d?.error) return `error: ${d.error}`;
+          const max = Math.max(...(d.call_impact ?? []).map((c: any) => c.depth), 0);
+          return max <= 5 || `max depth=${max}`;
+        } },
+      { tool: "get_impact_analysis", args: { function: ds.functionWithCallers, workspace: ds.workspace },
+        label: "impact: no duplicate callers",
+        assert: d => {
+          if (d?.error) return `error: ${d.error}`;
+          const keys = (d.call_impact ?? []).map((c: any) => `${c.function}::${c.file}`);
+          const dupes = keys.filter((k: string, i: number) => keys.indexOf(k) !== i);
+          return dupes.length === 0 || `duplicates: ${dupes.join(", ")}`;
+        } },
+      { tool: "get_impact_analysis", args: { function: ds.functionWithCallers, workspace: ds.workspace, change_type: "signature" },
+        label: "impact: call_line on depth-1 only",
+        assert: d => {
+          if (d?.error) return `error: ${d.error}`;
+          for (const item of d.call_impact ?? []) {
+            if (item.depth === 1 && item.call_line === undefined) return `depth-1 caller ${item.function} missing call_line`;
+            if (item.depth > 1 && item.call_line !== undefined) return `depth-${item.depth} caller ${item.function} should not have call_line`;
+          }
+          return true;
+        } },
+    );
+  } else {
+    cases.push(skip("impact: callers", "no function with >=3 callers found"));
+  }
+
+  // Type impact (conditional: interfaceRecord)
+  if (ds.interfaceRecord) {
+    cases.push(
+      { tool: "get_impact_analysis", args: { function: ds.interfaceRecord, workspace: ds.workspace, change_type: "signature" },
+        label: "impact: interface → implementors type_impact",
+        assert: d => {
+          if (d?.error) return `error: ${d.error}`;
+          const implGroup = (d.type_impact ?? []).find((t: any) => t.relationship === "implementors");
+          return implGroup ? true : "no implementors group in type_impact";
+        } },
+      { tool: "get_impact_analysis", args: { function: ds.interfaceRecord, workspace: ds.workspace, change_type: "signature" },
+        label: "impact: interface → implementor_callers bridge",
+        assert: d => {
+          if (d?.error) return `error: ${d.error}`;
+          const bridge = (d.type_impact ?? []).find((t: any) => t.relationship === "implementor_callers");
+          return bridge ? true : "no implementor_callers in type_impact";
+        } },
+    );
+  } else {
+    cases.push(skip("impact: type_impact", "no interface with implementors found"));
+  }
+
+  return cases;
 }
 
 function buildSemanticSearchTests(ctx: AppContext, ds: DiscoveryState): TestCase[] {

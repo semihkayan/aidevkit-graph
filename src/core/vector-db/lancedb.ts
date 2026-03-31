@@ -88,13 +88,13 @@ export class LanceDBStore implements IVectorDatabase, IFullTextSearch {
   async ftsSearch(queryText: string, topK: number, filter?: SearchFilter): Promise<RankedResult[]> {
     if (!this.table || !this._ftsAvailable) return [];
     try {
-      let q = this.table.search(queryText, { queryType: "fts" }).limit(topK);
+      let q = this.table.query().fullTextSearch(queryText).limit(topK);
       const where = this.buildWhereClause(filter);
       if (where) q = q.where(where);
       const rows = await q.toArray();
       return rows.map((row: any, rank: number) => ({
         id: row.id, row, score: rank,
-        distance: row._score as number | undefined,
+        // distance intentionally omitted — FTS _score is BM25 relevance, not L2 distance
       }));
     } catch {
       return [];
@@ -172,7 +172,7 @@ export class LanceDBStore implements IVectorDatabase, IFullTextSearch {
 
   private async validateFtsIndex(): Promise<void> {
     try {
-      await this.table!.search("__fts_probe__", { queryType: "fts" }).limit(1).toArray();
+      await this.table!.query().fullTextSearch("__fts_probe__").limit(1).toArray();
       this._ftsAvailable = true;
     } catch {
       this._ftsAvailable = false;
@@ -185,10 +185,11 @@ export class LanceDBStore implements IVectorDatabase, IFullTextSearch {
     try {
       const lancedb = await import("@lancedb/lancedb");
       await this.table.createIndex("chunkText", { config: lancedb.Index.fts() });
+      // Verify the index actually works (legacy indices may exist but fail at query time)
+      await this.table.query().fullTextSearch("__fts_verify__").limit(1).toArray();
       this._ftsAvailable = true;
-    } catch (err) {
+    } catch {
       this._ftsAvailable = false;
-      // Known issue: lancedb.Index.fts() may not be available in all versions
     }
   }
 }

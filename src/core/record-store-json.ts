@@ -12,11 +12,12 @@ const AST_CACHE_VERSION = 5;
 export class JsonFileRecordStore implements IRecordStore {
   constructor(private cacheDir: string) {}
 
-  async loadAll(): Promise<{ records: FunctionRecord[]; hashes: Map<string, string> }> {
+  async loadAll(): Promise<{ records: FunctionRecord[]; hashes: Map<string, string>; mtimes: Map<string, number> }> {
     const records: FunctionRecord[] = [];
     const hashes = new Map<string, string>();
+    const mtimes = new Map<string, number>();
 
-    if (!existsSync(this.cacheDir)) return { records, hashes };
+    if (!existsSync(this.cacheDir)) return { records, hashes, mtimes };
 
     const files = await readdir(this.cacheDir);
     for (const file of files) {
@@ -26,6 +27,7 @@ export class JsonFileRecordStore implements IRecordStore {
         const data = JSON.parse(content) as {
           filePath: string;
           fileHash: string;
+          fileMtime?: number;
           version?: number;
           records: FunctionRecord[];
         };
@@ -33,20 +35,23 @@ export class JsonFileRecordStore implements IRecordStore {
         if (data.version !== AST_CACHE_VERSION) continue;
         records.push(...data.records);
         hashes.set(data.filePath, data.fileHash);
+        if (data.fileMtime != null) {
+          mtimes.set(data.filePath, data.fileMtime);
+        }
       } catch {
         // Corrupt cache file — skip, will be re-parsed
       }
     }
 
-    return { records, hashes };
+    return { records, hashes, mtimes };
   }
 
-  async saveFile(filePath: string, records: FunctionRecord[], hash: string): Promise<void> {
+  async saveFile(filePath: string, records: FunctionRecord[], hash: string, mtimeMs: number): Promise<void> {
     await this.ensureDir();
     const cacheFile = this.getCacheFileName(filePath);
     await writeFile(
       path.join(this.cacheDir, cacheFile),
-      JSON.stringify({ version: AST_CACHE_VERSION, filePath, fileHash: hash, records }, null, 2)
+      JSON.stringify({ version: AST_CACHE_VERSION, filePath, fileHash: hash, fileMtime: mtimeMs, records }, null, 2)
     );
   }
 

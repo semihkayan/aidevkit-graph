@@ -181,8 +181,8 @@ export interface IGitService {
 // === Persistence ===
 
 export interface IRecordStore {
-  loadAll(): Promise<{ records: FunctionRecord[]; hashes: Map<string, string> }>;
-  saveFile(filePath: string, records: FunctionRecord[], hash: string): Promise<void>;
+  loadAll(): Promise<{ records: FunctionRecord[]; hashes: Map<string, string>; mtimes: Map<string, number> }>;
+  saveFile(filePath: string, records: FunctionRecord[], hash: string, mtimeMs: number): Promise<void>;
   deleteFile(filePath: string): Promise<void>;
   getFileHash(filePath: string): Promise<string | null>;
   deleteOrphans?(activeFiles: Set<string>): Promise<void>;
@@ -191,7 +191,11 @@ export interface IRecordStore {
 // === Staleness ===
 
 export interface IStalenessChecker {
-  getChangedFiles(projectRoot: string, knownHashes: Map<string, string>): Promise<string[]>;
+  getChangedFiles(
+    projectRoot: string,
+    knownHashes: Map<string, string>,
+    knownMtimes: Map<string, number>,
+  ): Promise<{ changed: string[]; mtimes: Map<string, number> }>;
   computeHash(filePath: string): Promise<string>;
 }
 

@@ -11,6 +11,9 @@ export class CallGraphManager implements ICallGraphReader, ICallGraphWriter {
   private graph: CallGraph = new Map();
   private selfKeywords: ReadonlySet<string>;
   private typeGraph?: ITypeGraphReader;
+  // Populated by removeByFile(), consumed and cleared by buildForFiles().
+  // Tracks callers whose forward edges were nullified so they can be re-resolved.
+  private affectedCallerIds = new Set<string>();
 
   constructor(
     private importResolver: IImportResolver,
@@ -26,44 +29,11 @@ export class CallGraphManager implements ICallGraphReader, ICallGraphWriter {
 
   async build(index: IFunctionIndexReader, projectRoot: string): Promise<CallGraph> {
     this.graph.clear();
+    this.affectedCallerIds.clear();
 
-    for (const filePath of index.getAllFilePaths()) {
-      const parser = this.parsers.find(p => p.canParse(filePath));
-      if (!parser) continue;
+    await this.processFiles(index.getAllFilePaths(), index, projectRoot);
 
-      const absPath = path.join(projectRoot, filePath);
-      let source: string;
-      try {
-        source = await readFile(absPath);
-      } catch {
-        continue; // File may have been deleted
-      }
-
-      const imports = this.importResolver.resolveImports(source, filePath, projectRoot);
-      const recordIds = index.getFileRecordIds(filePath);
-
-      for (const recordId of recordIds) {
-        const record = index.getById(recordId);
-        if (!record || record.kind === "class") continue; // Skip class records, process methods
-
-        const rawCalls = parser.parseCalls(source, record.lineStart, record.lineEnd);
-
-        const resolvedCalls = rawCalls.map(call => {
-          const target = call.objectName ? `${call.objectName}.${call.name}` : call.name;
-          const resolvedFile = this.resolveCallTarget(call, imports, filePath);
-          return {
-            target,
-            resolvedFile,
-            resolvedId: null as string | null,
-            line: call.line,
-          };
-        });
-
-        this.graph.set(recordId, { calls: resolvedCalls, calledBy: [] });
-      }
-    }
-
-    // Resolve target IDs + build reverse graph
+    // Full scan — correct for full rebuild
     this.resolveTargetIds(index);
     this.buildReverseGraph(index);
 
@@ -71,38 +41,14 @@ export class CallGraphManager implements ICallGraphReader, ICallGraphWriter {
   }
 
   async buildForFiles(files: string[], index: IFunctionIndexReader, projectRoot: string): Promise<void> {
-    for (const filePath of files) {
-      const parser = this.parsers.find(p => p.canParse(filePath));
-      if (!parser) continue;
+    const newEntryIds = await this.processFiles(files, index, projectRoot);
 
-      const absPath = path.join(projectRoot, filePath);
-      let source: string;
-      try {
-        source = await readFile(absPath);
-      } catch {
-        continue;
-      }
+    // Combine new entries + callers affected by removeByFile
+    const toResolve = new Set([...newEntryIds, ...this.affectedCallerIds]);
+    this.affectedCallerIds.clear();
 
-      const imports = this.importResolver.resolveImports(source, filePath, projectRoot);
-      const recordIds = index.getFileRecordIds(filePath);
-
-      for (const recordId of recordIds) {
-        const record = index.getById(recordId);
-        if (!record || record.kind === "class") continue;
-
-        const rawCalls = parser.parseCalls(source, record.lineStart, record.lineEnd);
-        const resolvedCalls = rawCalls.map(call => {
-          const target = call.objectName ? `${call.objectName}.${call.name}` : call.name;
-          const resolvedFile = this.resolveCallTarget(call, imports, filePath);
-          return { target, resolvedFile, resolvedId: null as string | null, line: call.line };
-        });
-
-        this.graph.set(recordId, { calls: resolvedCalls, calledBy: [] });
-      }
-    }
-
-    this.resolveTargetIds(index);
-    this.buildReverseGraph(index);
+    this.resolveTargetIds(index, toResolve);
+    this.addReverseEdgesForEntries(toResolve, index);
   }
 
   removeByFile(filePath: string, _index: IFunctionIndexReader): void {
@@ -123,8 +69,9 @@ export class CallGraphManager implements ICallGraphReader, ICallGraphWriter {
             }
           }
         }
-        // Clean reverse edges from callers
+        // Clean reverse edges from callers + track affected callers for re-resolution
         for (const caller of entry.calledBy) {
+          this.affectedCallerIds.add(caller.caller);
           const callerEntry = this.graph.get(caller.caller);
           if (callerEntry) {
             for (const call of callerEntry.calls) {
@@ -208,10 +155,55 @@ export class CallGraphManager implements ICallGraphReader, ICallGraphWriter {
     const loaded = await loadGraphJson(path.join(cacheDir, "call-graph.json"), fp);
     if (!loaded) return false;
     this.graph = loaded as CallGraph;
+    this.affectedCallerIds.clear();
     return true;
   }
 
   // === Private ===
+
+  /**
+   * Parse files and create forward-edge entries in the graph.
+   * Shared by build() and buildForFiles() to avoid duplication.
+   */
+  private async processFiles(
+    files: string[],
+    index: IFunctionIndexReader,
+    projectRoot: string,
+  ): Promise<string[]> {
+    const processedIds: string[] = [];
+
+    for (const filePath of files) {
+      const parser = this.parsers.find(p => p.canParse(filePath));
+      if (!parser) continue;
+
+      const absPath = path.join(projectRoot, filePath);
+      let source: string;
+      try {
+        source = await readFile(absPath);
+      } catch {
+        continue;
+      }
+
+      const imports = this.importResolver.resolveImports(source, filePath, projectRoot);
+
+      for (const recordId of index.getFileRecordIds(filePath)) {
+        const record = index.getById(recordId);
+        if (!record || record.kind === "class") continue;
+
+        const rawCalls = parser.parseCalls(source, record.lineStart, record.lineEnd);
+        const resolvedCalls = rawCalls.map(call => {
+          const target = call.objectName ? `${call.objectName}.${call.name}` : call.name;
+          const resolvedFile = this.resolveCallTarget(call, imports, filePath);
+          return { target, resolvedFile, resolvedId: null as string | null, line: call.line };
+        });
+
+        this.graph.set(recordId, { calls: resolvedCalls, calledBy: [] });
+        processedIds.push(recordId);
+      }
+    }
+
+    return processedIds;
+  }
 
   private resolveCallTarget(
     call: { name: string; objectName?: string },
@@ -234,8 +226,19 @@ export class CallGraphManager implements ICallGraphReader, ICallGraphWriter {
     return null;
   }
 
-  private resolveTargetIds(index: IFunctionIndexReader): void {
-    for (const [_callerId, entry] of this.graph) {
+  /**
+   * Resolve call target IDs from file paths + names to concrete record IDs.
+   * When scope is provided, only processes those entries (incremental path).
+   * Without scope, processes the entire graph (full rebuild).
+   */
+  private resolveTargetIds(index: IFunctionIndexReader, scope?: Set<string>): void {
+    const entries: Iterable<[string, CallGraphEntry]> = scope
+      ? Array.from(scope)
+          .map(id => [id, this.graph.get(id)] as [string, CallGraphEntry | undefined])
+          .filter((pair): pair is [string, CallGraphEntry] => pair[1] !== undefined)
+      : this.graph;
+
+    for (const [callerId, entry] of entries) {
       for (const call of entry.calls) {
         if (call.resolvedFile) {
           // Find function in resolved file by name
@@ -248,7 +251,7 @@ export class CallGraphManager implements ICallGraphReader, ICallGraphWriter {
         } else if (this.selfKeywords.has(call.target.split(".")[0])) {
           // self.method() or this.method() — find in same file only
           const methodName = call.target.split(".").pop()!;
-          const callerRecord = index.getById(_callerId);
+          const callerRecord = index.getById(callerId);
           if (callerRecord) {
             const sameFileRecords = index.getByFile(callerRecord.filePath);
             const match = sameFileRecords.find(r =>
@@ -260,7 +263,7 @@ export class CallGraphManager implements ICallGraphReader, ICallGraphWriter {
 
         // Type-aware resolution for still-unresolved calls
         if (!call.resolvedId && this.typeGraph) {
-          const resolved = this.resolveViaTypeGraph(call.target, _callerId, index);
+          const resolved = this.resolveViaTypeGraph(call.target, callerId, index);
           if (resolved) call.resolvedId = resolved;
         }
       }
@@ -376,6 +379,41 @@ export class CallGraphManager implements ICallGraphReader, ICallGraphWriter {
     return null;
   }
 
+  /**
+   * Add reverse edges (calledBy) for specific entries only.
+   * Used by incremental path — avoids clearing and rebuilding the entire reverse graph.
+   * The alreadyTracked check prevents duplicates when processing affected callers
+   * that already have reverse edges for their non-nullified calls.
+   */
+  private addReverseEdgesForEntries(entryIds: Set<string>, index: IFunctionIndexReader): void {
+    for (const callerId of entryIds) {
+      const entry = this.graph.get(callerId);
+      if (!entry) continue;
+      const callerRecord = index.getById(callerId);
+      if (!callerRecord) continue;
+
+      for (const call of entry.calls) {
+        if (!call.resolvedId) continue;
+        const targetEntry = this.graph.get(call.resolvedId);
+        if (!targetEntry) continue;
+
+        const alreadyTracked = targetEntry.calledBy.some(c => c.caller === callerId);
+        if (!alreadyTracked) {
+          targetEntry.calledBy.push({
+            caller: callerId,
+            callerName: callerRecord.name,
+            file: callerRecord.filePath,
+            line: call.line,
+          });
+        }
+      }
+    }
+  }
+
+  /**
+   * Build the complete reverse graph from scratch.
+   * Used by full rebuild only — clears all calledBy arrays and rebuilds from forward edges.
+   */
   private buildReverseGraph(index: IFunctionIndexReader): void {
     // Clear all calledBy arrays first to avoid stale/duplicate entries
     for (const entry of this.graph.values()) {
@@ -389,12 +427,17 @@ export class CallGraphManager implements ICallGraphReader, ICallGraphWriter {
           if (!callerRecord) continue;
           const targetEntry = this.graph.get(call.resolvedId);
           if (targetEntry) {
-            targetEntry.calledBy.push({
-              caller: callerId,
-              callerName: callerRecord.name,
-              file: callerRecord.filePath,
-              line: call.line,
-            });
+            // Deduplicate: one calledBy entry per unique caller (a function may call
+            // the same target multiple times at different lines — only track the link once)
+            const alreadyTracked = targetEntry.calledBy.some(c => c.caller === callerId);
+            if (!alreadyTracked) {
+              targetEntry.calledBy.push({
+                caller: callerId,
+                callerName: callerRecord.name,
+                file: callerRecord.filePath,
+                line: call.line,
+              });
+            }
           }
         }
       }
@@ -403,5 +446,6 @@ export class CallGraphManager implements ICallGraphReader, ICallGraphWriter {
 
   clear(): void {
     this.graph.clear();
+    this.affectedCallerIds.clear();
   }
 }

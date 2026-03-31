@@ -133,7 +133,7 @@ export interface RankedResult {
   id: string;
   row: VectorRow;
   score: number;
-  distance?: number;  // Raw vector distance from LanceDB (lower = more similar)
+  distance?: number;  // Vector search only: L2 distance (lower = more similar). NOT set for FTS results.
 }
 
 export interface SearchFilter {

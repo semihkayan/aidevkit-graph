@@ -9,18 +9,27 @@ import type { Config } from "../types/interfaces.js";
 export class HashBasedStalenessChecker implements IStalenessChecker {
   constructor(private config: Config) {}
 
-  async getChangedFiles(projectRoot: string, knownHashes: Map<string, string>): Promise<string[]> {
+  async getChangedFiles(
+    projectRoot: string,
+    knownHashes: Map<string, string>,
+    knownMtimes: Map<string, number>,
+  ): Promise<{ changed: string[]; mtimes: Map<string, number> }> {
     // globSourceFiles returns ABSOLUTE paths
     const allAbsFiles = await globSourceFiles(projectRoot, this.config);
     const changed: string[] = [];
+    const updatedMtimes = new Map<string, number>();
 
-    // Convert known hashes (relative keys) to absolute for comparison
+    // Convert known data (relative keys) to absolute for comparison
     const knownAbsolute = new Map<string, string>();
+    const mtimeAbsolute = new Map<string, number>();
     for (const [relPath, hash] of knownHashes) {
-      knownAbsolute.set(path.join(projectRoot, relPath), hash);
+      const abs = path.join(projectRoot, relPath);
+      knownAbsolute.set(abs, hash);
+      const mt = knownMtimes.get(relPath);
+      if (mt != null) mtimeAbsolute.set(abs, mt);
     }
 
-    // Detect changed/new files — use mtime optimization
+    // Detect changed/new files
     for (const absPath of allAbsFiles) {
       const known = knownAbsolute.get(absPath);
       if (!known) {
@@ -29,11 +38,19 @@ export class HashBasedStalenessChecker implements IStalenessChecker {
         continue;
       }
 
-      // Compute hash and compare
+      // mtime early exit: if mtime unchanged, content is definitely unchanged
+      const fileStat = await stat(absPath);
+      const currentMtime = fileStat.mtimeMs;
+      const knownMtime = mtimeAbsolute.get(absPath);
+      if (knownMtime != null && currentMtime === knownMtime) continue;
+
+      // mtime changed — verify with hash
       const newHash = await this.computeHash(absPath);
       if (known !== newHash) {
         changed.push(absPath);
       }
+      // Store updated mtime regardless (even if hash matches, mtime was different)
+      updatedMtimes.set(absPath, currentMtime);
     }
 
     // Detect deleted files
@@ -44,7 +61,7 @@ export class HashBasedStalenessChecker implements IStalenessChecker {
       }
     }
 
-    return changed;
+    return { changed, mtimes: updatedMtimes };
   }
 
   async computeHash(filePath: string): Promise<string> {
