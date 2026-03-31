@@ -1,7 +1,9 @@
-import type { AppContext } from "../types/interfaces.js";
+import type { AppContext, WorkspaceServices } from "../types/interfaces.js";
 import type { FunctionRecord } from "../types/index.js";
-import { resolveWorkspaceOrError, textResponse } from "./tool-utils.js";
+import { resolveWorkspaces, textResponse } from "./tool-utils.js";
 import { applyDensityAdjustment, countParamsFromSignature } from "./density-scorer.js";
+
+const MIN_SCORE = 0.4;
 
 /**
  * Generate a brief summary from function metadata when no docstring exists.
@@ -44,39 +46,44 @@ function buildAutoSummary(record: FunctionRecord): string {
   return parts.join(", ");
 }
 
-export async function handleSemanticSearch(
-  args: {
-    query: string; workspace?: string; scope?: string;
-    top_k?: number; tags_filter?: string[]; side_effects_filter?: string[];
-  },
-  ctx: AppContext
-) {
-  const resolved = resolveWorkspaceOrError(ctx, args.workspace);
-  if ("error" in resolved) return resolved.error;
-  const ws = resolved.ws;
+type EnrichedResult = {
+  function: string;
+  file: string;
+  module: string;
+  signature: string;
+  summary: string;
+  tags: string[];
+  score: number;
+  line_start: number;
+  line_end: number;
+  workspace?: string;
+  record: FunctionRecord; // Temporarily attached for density adjustments
+};
 
-  const topK = args.top_k ?? 10;
-  const query = args.query.trim();
-
-  // Reject queries too short to be meaningful for semantic search
-  if (query.length < 2) {
-    return textResponse({ results: [], total_indexed: 0, search_mode: "skipped", note: "Query too short. Use at least 2 characters." });
-  }
-
+/**
+ * Search a single workspace and return enriched, density-adjusted results.
+ */
+async function searchSingleWorkspace(
+  ws: WorkspaceServices,
+  wsPath: string,
+  query: string,
+  topK: number,
+  options: { scope?: string; tags_filter?: string[]; side_effects_filter?: string[] },
+  ctx: AppContext,
+): Promise<{ results: EnrichedResult[]; desyncCount: number }> {
   // Over-fetch for density adjustment: constructors/accessors/tests get eliminated,
   // so we need a larger pool. Pipeline internally also over-fetches *2 for RRF merge.
   const rawResults = await ws.search.search(
     { text: query },
     {
       topK: topK * 3,
-      scope: args.scope,
-      tagsFilter: args.tags_filter,
-      sideEffectsFilter: args.side_effects_filter,
+      scope: options.scope,
+      tagsFilter: options.tags_filter,
+      sideEffectsFilter: options.side_effects_filter,
     }
   );
 
   // Filter out build artifacts, test fixtures, declaration files, and low-relevance noise
-  const MIN_SCORE = 0.4;
   const candidates = rawResults
     .filter(r =>
       !r.filePath.startsWith("dist/") &&
@@ -86,14 +93,11 @@ export async function handleSemanticSearch(
     .filter(r => r.score >= MIN_SCORE);
 
   // Enrich ALL candidates — density adjustment needs the full pool to rerank properly.
-  // Premature .slice(topK) here would let constructors/accessors occupy slots that
-  // density would eliminate, cutting off better results at lower raw positions.
   let desyncCount = 0;
-  const enriched = candidates
+  const enriched: EnrichedResult[] = candidates
     .map(r => {
       const record = ws.index.getById(r.id);
       if (!record) { desyncCount++; return null; }
-      // Auto-summary: use docstring summary if available, else build from signature
       const summary = r.summary || buildAutoSummary(record);
       return {
         function: r.name,
@@ -105,37 +109,78 @@ export async function handleSemanticSearch(
         score: r.score,
         line_start: record.lineStart,
         line_end: record.lineEnd,
-        record, // Temporarily attach for relevance adjustments
+        workspace: wsPath,
+        record,
       };
     })
     .filter((r): r is NonNullable<typeof r> => r !== null);
 
-  // Apply information density adjustments: demote low-info functions, boost high-info ones
+  // Apply information density adjustments per-workspace (centrality is workspace-local)
   applyDensityAdjustment(enriched, ws, ctx.config);
 
-  // Re-sort by adjusted score, drop results that fell below threshold, then final cut
-  enriched.sort((a, b) => b.score - a.score);
-  const finalResults = enriched.filter(r => r.score >= MIN_SCORE).slice(0, topK);
+  return { results: enriched, desyncCount };
+}
 
-  // Clean up: remove internal record reference and round scores
+export async function handleSemanticSearch(
+  args: {
+    query: string; workspace?: string; scope?: string;
+    top_k?: number; tags_filter?: string[]; side_effects_filter?: string[];
+  },
+  ctx: AppContext
+) {
+  const resolved = resolveWorkspaces(ctx, args.workspace);
+  if ("error" in resolved) return resolved.error;
+
+  const topK = args.top_k ?? 10;
+  const query = args.query.trim();
+
+  // Reject queries too short to be meaningful for semantic search
+  if (query.length < 2) {
+    return textResponse({ results: [], total_indexed: 0, search_mode: "skipped", note: "Query too short. Use at least 2 characters." });
+  }
+
+  // Search all resolved workspaces and merge results
+  const allResults: EnrichedResult[] = [];
+  let totalDesync = 0;
+  let totalIndexed = 0;
+  let totalVectors = 0;
+
+  for (const { ws, wsPath } of resolved.workspaces) {
+    const { results, desyncCount } = await searchSingleWorkspace(
+      ws, wsPath, query, topK,
+      { scope: args.scope, tags_filter: args.tags_filter, side_effects_filter: args.side_effects_filter },
+      ctx,
+    );
+    allResults.push(...results);
+    totalDesync += desyncCount;
+
+    const stats = ws.index.getStats();
+    totalIndexed += stats.functions + stats.classes;
+    totalVectors += await ws.vectorDb.countRows();
+  }
+
+  // Re-sort by adjusted score across all workspaces, filter and cut
+  allResults.sort((a, b) => b.score - a.score);
+  const finalResults = allResults.filter(r => r.score >= MIN_SCORE).slice(0, topK);
+
+  // Clean up: remove internal record reference, round scores, handle workspace field
+  const showWorkspace = ctx.isMultiWorkspace;
   for (const r of finalResults) {
     delete (r as any).record;
     r.score = Math.round(r.score * 1000) / 1000;
+    if (!showWorkspace) delete r.workspace;
   }
 
   // Determine search mode
-  const stats = ws.index.getStats();
   const embeddingAvailable = ctx.embeddingAvailable;
-  const vectorCount = await ws.vectorDb.countRows();
-
   let searchMode: string;
-  if (embeddingAvailable && vectorCount > 0) searchMode = "hybrid";
-  else if (vectorCount > 0) searchMode = "vector_only"; // Vectors exist but Ollama down now
+  if (embeddingAvailable && totalVectors > 0) searchMode = "hybrid";
+  else if (totalVectors > 0) searchMode = "vector_only";
   else searchMode = "degraded";
 
   const response: Record<string, unknown> = {
     results: finalResults,
-    total_indexed: stats.functions + stats.classes,
+    total_indexed: totalIndexed,
     search_mode: searchMode,
   };
 
@@ -143,11 +188,11 @@ export async function handleSemanticSearch(
   if (!embeddingAvailable) {
     warnings.push("Ollama unavailable. Run: ollama serve && ollama pull " + ctx.config.embedding.model);
   }
-  if (vectorCount === 0) {
+  if (totalVectors === 0) {
     warnings.push("No vectors indexed. Run reindex with Ollama running.");
   }
-  if (desyncCount > 0) {
-    warnings.push(`${desyncCount} results skipped (index/vector desync). Run reindex to fix.`);
+  if (totalDesync > 0) {
+    warnings.push(`${totalDesync} results skipped (index/vector desync). Run reindex to fix.`);
   }
   if (warnings.length > 0) {
     response.warning = warnings.join(" ");

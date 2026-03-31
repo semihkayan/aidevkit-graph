@@ -1,21 +1,33 @@
 import type { AppContext } from "../types/interfaces.js";
 import type { FunctionRecord } from "../types/index.js";
-import { resolveWorkspaceOrError, textResponse, errorResponse } from "./tool-utils.js";
+import { resolveWorkspaces, textResponse, errorResponse } from "./tool-utils.js";
 
 export async function handleModuleSummary(
   args: { module: string; workspace?: string; file?: string; detail?: string },
   ctx: AppContext
 ) {
-  const resolved = resolveWorkspaceOrError(ctx, args.workspace);
+  const resolved = resolveWorkspaces(ctx, args.workspace);
   if ("error" in resolved) return resolved.error;
-  const ws = resolved.ws;
-  const records = ws.index.getByModule(args.module);
 
-  if (records.length === 0) {
-    // Suggest similar modules
-    const allModules = ws.index.getAllModules().filter(m => m.length > 0);
+  // Collect records from all workspaces
+  const wsRecords: Array<{ wsPath: string; records: FunctionRecord[] }> = [];
+  for (const { ws, wsPath } of resolved.workspaces) {
+    const records = ws.index.getByModule(args.module);
+    if (records.length > 0) {
+      wsRecords.push({ wsPath, records });
+    }
+  }
+
+  if (wsRecords.length === 0) {
+    // Suggest similar modules from all workspaces
+    const allModules = new Set<string>();
+    for (const { ws } of resolved.workspaces) {
+      for (const m of ws.index.getAllModules()) {
+        if (m.length > 0) allModules.add(m);
+      }
+    }
     const query = args.module.toLowerCase();
-    const suggestions = allModules
+    const suggestions = Array.from(allModules)
       .filter(m => {
         const ml = m.toLowerCase();
         if (ml.includes(query) || query.includes(ml)) return true;
@@ -31,19 +43,48 @@ export async function handleModuleSummary(
       .slice(0, 5);
 
     return errorResponse("MODULE_NOT_FOUND",
-      `Module '${args.module}' not found.`,
+      `Module '${args.module}' not found${resolved.workspaces.length > 1 ? " in any workspace" : ""}.`,
       suggestions.length > 0 ? `Did you mean: ${suggestions.join(", ")}?` : undefined
     );
   }
 
+  const showWorkspace = ctx.isMultiWorkspace;
+
+  // Single workspace with results — standard output
+  if (wsRecords.length === 1) {
+    const { wsPath, records } = wsRecords[0];
+    const result = buildModuleOutput(args.module, records, args.file, args.detail, ctx);
+    if (showWorkspace) (result as any).workspace = wsPath;
+    return textResponse(result);
+  }
+
+  // Multiple workspaces — combine with workspace labels
+  const workspaceResults = wsRecords.map(({ wsPath, records }) => ({
+    workspace: wsPath,
+    ...buildModuleOutput(args.module, records, args.file, args.detail, ctx),
+  }));
+
+  return textResponse({
+    module: args.module,
+    workspaces: workspaceResults,
+  });
+}
+
+function buildModuleOutput(
+  module: string,
+  records: FunctionRecord[],
+  file?: string,
+  requestedDetail?: string,
+  ctx?: AppContext,
+) {
   // Filter by file if specified
-  let filtered = args.file
-    ? records.filter(r => r.filePath.endsWith(args.file!))
+  let filtered = file
+    ? records.filter(r => r.filePath.endsWith(file))
     : records;
 
   // Determine detail level
-  const requestedDetail = args.detail || "auto";
-  const showPrivate = requestedDetail === "full";
+  const detail = requestedDetail || "auto";
+  const showPrivate = detail === "full";
 
   // In auto/compact modes: hide private/protected and constructors
   if (!showPrivate) {
@@ -53,35 +94,23 @@ export async function handleModuleSummary(
   }
 
   // Progressive disclosure based on filtered count
-  const threshold = ctx.config.moduleSummary;
+  const threshold = ctx?.config.moduleSummary || { compactThreshold: 20, filesOnlyThreshold: 50, maxTokenBudget: 4000 };
   let mode: string;
-  if (requestedDetail === "auto") {
+  if (detail === "auto") {
     if (filtered.length <= threshold.compactThreshold) mode = "full";
     else if (filtered.length <= threshold.filesOnlyThreshold) mode = "compact";
     else mode = "files_only";
   } else {
-    mode = requestedDetail;
+    mode = detail;
   }
 
-  let result: unknown;
-
-  if (mode === "files_only") {
-    result = buildFilesOnly(args.module, filtered);
-  } else if (mode === "compact") {
-    result = buildCompact(args.module, filtered);
-  } else {
-    result = buildFull(args.module, filtered);
-  }
-
-  return textResponse(result);
+  if (mode === "files_only") return buildFilesOnly(module, filtered);
+  if (mode === "compact") return buildCompact(module, filtered);
+  return buildFull(module, filtered);
 }
 
 // === Output builders ===
 
-/**
- * files_only: file list with class names + function counts.
- * Agent can see which files and classes exist without opening anything.
- */
 function buildFilesOnly(module: string, records: FunctionRecord[]) {
   const fileMap = new Map<string, { classes: string[]; functions: number }>();
 
@@ -107,10 +136,6 @@ function buildFilesOnly(module: string, records: FunctionRecord[]) {
   };
 }
 
-/**
- * compact: grouped by file. Classes show method names inline.
- * Standalone functions show signature. No line numbers, no metadata.
- */
 function buildCompact(module: string, records: FunctionRecord[]) {
   const byFile = groupByFile(records);
 
@@ -119,7 +144,6 @@ function buildCompact(module: string, records: FunctionRecord[]) {
 
     const items: Array<Record<string, unknown>> = [];
 
-    // Classes with method names
     for (const [className, cls] of classItems) {
       const entry: Record<string, unknown> = {
         name: className,
@@ -132,7 +156,6 @@ function buildCompact(module: string, records: FunctionRecord[]) {
       items.push(entry);
     }
 
-    // Standalone functions
     for (const r of standaloneItems) {
       items.push({
         name: r.name,
@@ -147,10 +170,6 @@ function buildCompact(module: string, records: FunctionRecord[]) {
   return { module, mode: "compact", total: records.length, files };
 }
 
-/**
- * full: grouped by file, classes with methods nested.
- * Includes summary, tags, line numbers — only when present.
- */
 function buildFull(module: string, records: FunctionRecord[]) {
   const byFile = groupByFile(records);
 
@@ -159,7 +178,6 @@ function buildFull(module: string, records: FunctionRecord[]) {
 
     const items: Array<Record<string, unknown>> = [];
 
-    // Classes with nested methods
     for (const [className, cls] of classItems) {
       const classEntry: Record<string, unknown> = {
         name: className,
@@ -172,7 +190,7 @@ function buildFull(module: string, records: FunctionRecord[]) {
       if (cls.methods.length > 0) {
         classEntry.methods = cls.methods.map(m => {
           const method: Record<string, unknown> = {
-            name: m.name.split(".").pop()!, // "Class.method" → "method"
+            name: m.name.split(".").pop()!,
             signature: flattenSignature(m.signature),
             line_start: m.lineStart,
           };
@@ -183,7 +201,6 @@ function buildFull(module: string, records: FunctionRecord[]) {
       items.push(classEntry);
     }
 
-    // Standalone functions/interfaces
     for (const r of standaloneItems) {
       const entry: Record<string, unknown> = {
         name: r.name,
@@ -217,7 +234,6 @@ function splitByClass(records: FunctionRecord[]) {
   const standaloneItems: FunctionRecord[] = [];
   const seen = new Set<string>();
 
-  // First pass: find class/interface records
   for (const r of records) {
     if (seen.has(r.id)) continue;
     seen.add(r.id);
@@ -226,21 +242,18 @@ function splitByClass(records: FunctionRecord[]) {
     }
   }
 
-  // Second pass: attach methods to classes, collect standalone
   for (const r of records) {
     if (seen.has(r.id) && (r.kind === "class" || r.kind === "interface")) continue;
     if (r.kind === "method") {
       const className = r.name.split(".")[0];
       const cls = classItems.get(className);
       if (cls) {
-        // Deduplicate methods by name
         if (!cls.methods.some(m => m.name === r.name)) {
           cls.methods.push(r);
         }
         continue;
       }
     }
-    // Deduplicate standalone items
     if (!standaloneItems.some(s => s.id === r.id)) {
       standaloneItems.push(r);
     }
@@ -249,13 +262,11 @@ function splitByClass(records: FunctionRecord[]) {
   return { classItems, standaloneItems };
 }
 
-/** Only add summary/tags when they carry information. Never emit null or empty. */
 function addOptionalDocstring(entry: Record<string, unknown>, record: FunctionRecord): void {
   if (record.docstring?.summary) entry.summary = record.docstring.summary;
   if (record.docstring?.tags && record.docstring.tags.length > 0) entry.tags = record.docstring.tags;
 }
 
-/** Collapse multi-line signatures to single line. */
 function flattenSignature(sig: string): string {
   return sig.replace(/\s*\n\s*/g, " ").trim();
 }

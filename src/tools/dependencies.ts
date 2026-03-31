@@ -1,5 +1,6 @@
-import type { AppContext } from "../types/interfaces.js";
-import { resolveWorkspaceOrError, resolveFunctionOrError, textResponse } from "./tool-utils.js";
+import type { AppContext, WorkspaceServices } from "../types/interfaces.js";
+import type { FunctionRecord } from "../types/index.js";
+import { resolveFunctionAcrossWorkspaces, textResponse } from "./tool-utils.js";
 
 // Common utility calls that are noise in dependency analysis
 const NOISE_TARGETS = new Set([
@@ -188,17 +189,7 @@ function matchesDep(target: string, dep: string): boolean {
   return false;
 }
 
-export async function handleDependencies(
-  args: { function: string; workspace?: string; module?: string },
-  ctx: AppContext
-) {
-  const resolved = resolveWorkspaceOrError(ctx, args.workspace);
-  if ("error" in resolved) return resolved.error;
-  const ws = resolved.ws;
-
-  const fn = resolveFunctionOrError(ws, args.function, args.module);
-  if ("error" in fn) return fn.error;
-  const record = fn.record;
+function analyzeDependencies(ws: WorkspaceServices, record: FunctionRecord) {
   const entry = ws.callGraph.getEntry(record.id);
   const docDeps = record.docstring?.deps || [];
 
@@ -280,13 +271,51 @@ export async function handleDependencies(
     }
   }
 
+  return { confirmed, astOnly, unresolvedCalls, docstringOnly };
+}
+
+export async function handleDependencies(
+  args: { function: string; workspace?: string; module?: string },
+  ctx: AppContext
+) {
+  const resolved = resolveFunctionAcrossWorkspaces(ctx, args.function, args.module, args.workspace);
+  if ("error" in resolved) return resolved.error;
+
+  const showWorkspace = ctx.isMultiWorkspace;
+
+  if (resolved.matches.length === 1) {
+    const { ws, wsPath, record } = resolved.matches[0];
+    const { confirmed, astOnly, unresolvedCalls, docstringOnly } = analyzeDependencies(ws, record);
+
+    return textResponse({
+      function: record.name,
+      file: record.filePath,
+      ...(showWorkspace ? { workspace: wsPath } : {}),
+      calls: confirmed,
+      ...(astOnly.length > 0 ? { ast_only: astOnly } : {}),
+      ...(docstringOnly.length > 0 ? { docstring_only: docstringOnly } : {}),
+      ...(unresolvedCalls.length > 0 ? { unresolved: unresolvedCalls } : {}),
+      caveat: "Static analysis only. Dynamic dispatch, callbacks, and inherited methods are not captured.",
+    });
+  }
+
+  // Multiple matches across workspaces
+  const results = resolved.matches.map(({ ws, wsPath, record }) => {
+    const { confirmed, astOnly, unresolvedCalls, docstringOnly } = analyzeDependencies(ws, record);
+    return {
+      function: record.name,
+      file: record.filePath,
+      workspace: wsPath,
+      calls: confirmed,
+      ...(astOnly.length > 0 ? { ast_only: astOnly } : {}),
+      ...(docstringOnly.length > 0 ? { docstring_only: docstringOnly } : {}),
+      ...(unresolvedCalls.length > 0 ? { unresolved: unresolvedCalls } : {}),
+    };
+  });
+
   return textResponse({
-    function: record.name,
-    file: record.filePath,
-    calls: confirmed,
-    ...(astOnly.length > 0 ? { ast_only: astOnly } : {}),
-    ...(docstringOnly.length > 0 ? { docstring_only: docstringOnly } : {}),
-    ...(unresolvedCalls.length > 0 ? { unresolved: unresolvedCalls } : {}),
+    matches: results,
+    note: `Function '${args.function}' found in ${results.length} workspaces. Use workspace parameter to target one.`,
     caveat: "Static analysis only. Dynamic dispatch, callbacks, and inherited methods are not captured.",
   });
 }

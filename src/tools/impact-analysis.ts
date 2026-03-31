@@ -1,19 +1,8 @@
-import type { AppContext } from "../types/interfaces.js";
-import { resolveWorkspaceOrError, resolveFunctionOrError, textResponse } from "./tool-utils.js";
+import type { AppContext, WorkspaceServices } from "../types/interfaces.js";
+import type { FunctionRecord } from "../types/index.js";
+import { resolveFunctionAcrossWorkspaces, textResponse } from "./tool-utils.js";
 
-export async function handleImpactAnalysis(
-  args: { function: string; workspace?: string; module?: string; change_type?: string },
-  ctx: AppContext
-) {
-  const resolved = resolveWorkspaceOrError(ctx, args.workspace);
-  if ("error" in resolved) return resolved.error;
-  const ws = resolved.ws;
-
-  const fn = resolveFunctionOrError(ws, args.function, args.module);
-  if ("error" in fn) return fn.error;
-  const record = fn.record;
-  const changeType = (args.change_type || "behavior") as "signature" | "behavior" | "removal";
-
+function analyzeImpact(ws: WorkspaceServices, record: FunctionRecord, changeType: "signature" | "behavior" | "removal") {
   // Call graph impact
   const upstream = ws.callGraph.getTransitive(record.id, "upstream", 5);
   const callImpact = upstream.nodes.map(n => {
@@ -36,7 +25,6 @@ export async function handleImpactAnalysis(
   // Type graph impact
   const typeImpact: any[] = [];
 
-  // Check if this is a class/interface — who implements/extends/uses it?
   if (record.kind === "class" || record.kind === "interface") {
     const typeName = record.name.split(".").pop()!;
 
@@ -74,13 +62,52 @@ export async function handleImpactAnalysis(
     }
   }
 
+  return { callImpact, typeImpact };
+}
+
+export async function handleImpactAnalysis(
+  args: { function: string; workspace?: string; module?: string; change_type?: string },
+  ctx: AppContext
+) {
+  const resolved = resolveFunctionAcrossWorkspaces(ctx, args.function, args.module, args.workspace);
+  if ("error" in resolved) return resolved.error;
+
+  const changeType = (args.change_type || "behavior") as "signature" | "behavior" | "removal";
+  const showWorkspace = ctx.isMultiWorkspace;
+
+  if (resolved.matches.length === 1) {
+    const { ws, wsPath, record } = resolved.matches[0];
+    const { callImpact, typeImpact } = analyzeImpact(ws, record, changeType);
+
+    return textResponse({
+      function: record.name,
+      file: record.filePath,
+      ...(showWorkspace ? { workspace: wsPath } : {}),
+      change_type: changeType,
+      call_impact: callImpact,
+      type_impact: typeImpact,
+      total_affected: callImpact.length + typeImpact.reduce((sum, t) => sum + t.affected.length, 0),
+      caveat: "Static analysis only. Dynamic dispatch, callbacks, and runtime type changes not captured.",
+    });
+  }
+
+  // Multiple matches across workspaces
+  const results = resolved.matches.map(({ ws, wsPath, record }) => {
+    const { callImpact, typeImpact } = analyzeImpact(ws, record, changeType);
+    return {
+      function: record.name,
+      file: record.filePath,
+      workspace: wsPath,
+      change_type: changeType,
+      call_impact: callImpact,
+      type_impact: typeImpact,
+      total_affected: callImpact.length + typeImpact.reduce((sum, t) => sum + t.affected.length, 0),
+    };
+  });
+
   return textResponse({
-    function: record.name,
-    file: record.filePath,
-    change_type: changeType,
-    call_impact: callImpact,
-    type_impact: typeImpact,
-    total_affected: callImpact.length + typeImpact.reduce((sum, t) => sum + t.affected.length, 0),
+    matches: results,
+    note: `Function '${args.function}' found in ${results.length} workspaces. Use workspace parameter to target one.`,
     caveat: "Static analysis only. Dynamic dispatch, callbacks, and runtime type changes not captured.",
   });
 }

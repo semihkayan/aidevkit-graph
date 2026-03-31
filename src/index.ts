@@ -9,20 +9,18 @@ import { logger } from "./utils/logger.js";
 
 // Schemas
 import {
-  SemanticSearchSchema, ModuleSummarySchema, FunctionSourceSchema, FileStructureSchema,
+  SemanticSearchSchema, ModuleSummarySchema, FunctionSourceSchema,
   IndexStatusSchema,
-  DependenciesSchema, CallersSchema, ImpactAnalysisSchema,
+  DependenciesSchema, ImpactAnalysisSchema,
   StaleDocstringsSchema, ReindexSchema,
 } from "./tools/schemas.js";
 
 // Handlers
 import { handleModuleSummary } from "./tools/module-summary.js";
 import { handleFunctionSource } from "./tools/function-source.js";
-import { handleFileStructure } from "./tools/file-structure.js";
 import { handleIndexStatus } from "./tools/index-status.js";
 import { handleSemanticSearch } from "./tools/semantic-search.js";
 import { handleDependencies } from "./tools/dependencies.js";
-import { handleCallers } from "./tools/callers.js";
 import { handleImpactAnalysis } from "./tools/impact-analysis.js";
 import { handleStaleDocstrings } from "./tools/stale-docstrings.js";
 import { handleReindex } from "./tools/reindex.js";
@@ -36,7 +34,7 @@ async function main() {
   const ctx = services;
 
   server.registerTool("semantic_search", {
-    description: "Search the codebase by meaning. Use as the FIRST STEP when looking for code related to a concept, feature, or bug — before grep or reading files. Finds functions even when you don't know exact names. Results include signature, body size, summary, and file location to help you decide what to open.",
+    description: "Search the codebase by meaning. Works across all workspaces automatically in monorepos. Use as the FIRST STEP when looking for code related to a concept, feature, or bug — before grep or reading files. Finds functions even when you don't know exact names. Results include workspace, signature, body size, summary, and file location to help you decide what to open.",
     inputSchema: SemanticSearchSchema.shape,
   }, (args) => handleSemanticSearch(args as any, ctx));
 
@@ -50,20 +48,10 @@ async function main() {
     inputSchema: FunctionSourceSchema.shape,
   }, (args) => handleFunctionSource(args as any, ctx));
 
-  server.registerTool("get_file_structure", {
-    description: "Get the project directory tree with function/class counts per directory. Use to orient yourself in an unfamiliar codebase or understand project layout.",
-    inputSchema: FileStructureSchema.shape,
-  }, (args) => handleFileStructure(args as any, ctx));
-
   server.registerTool("get_dependencies", {
     description: "Show what a function calls — its forward dependencies. Cross-validates AST analysis with @deps docstring annotations. Categorizes each dependency as confirmed (AST+docstring), AST-only, docstring-only, or unresolved.",
     inputSchema: DependenciesSchema.shape,
   }, (args) => handleDependencies(args as any, ctx));
-
-  server.registerTool("get_callers", {
-    description: "Show where a function is called from — reverse call graph. Use this to understand impact before modifying a function. Essential for safe refactoring.",
-    inputSchema: CallersSchema.shape,
-  }, (args) => handleCallers(args as any, ctx));
 
   server.registerTool("get_impact_analysis", {
     description: "Assess the blast radius of changing a function. Use BEFORE refactoring or modifying signatures. Combines call graph + type graph to find all affected code. Returns risk levels: high (direct callers + signature change), medium (indirect), low (transitive).",

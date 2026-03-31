@@ -1,8 +1,7 @@
 import { z } from "zod";
 
-// workspace: required when multiple workspaces, optional when single
 const workspace = z.string().optional().describe(
-  "Workspace path (e.g. 'backend', 'mobile'). Required when multiple workspaces detected."
+  "Workspace path (e.g. 'backend', 'mobile'). Optional — omit to search all workspaces."
 );
 
 export const SemanticSearchSchema = z.object({
@@ -34,24 +33,11 @@ export const DependenciesSchema = z.object({
   module: z.string().optional().describe("Disambiguate when multiple functions share the same name"),
 });
 
-export const CallersSchema = z.object({
-  function: z.string().min(1).describe("Function name to find callers for"),
-  workspace,
-  module: z.string().optional().describe("Disambiguate when multiple functions share the same name"),
-});
-
 export const ImpactAnalysisSchema = z.object({
   function: z.string().min(1).describe("Function you plan to change"),
   workspace,
   module: z.string().optional().describe("Disambiguate when multiple functions share the same name"),
   change_type: z.enum(["signature", "behavior", "removal"]).default("behavior").describe("Type of planned change: 'signature' (param/return type change — highest impact), 'behavior' (internal logic change — default), 'removal' (deleting the function)"),
-});
-
-export const FileStructureSchema = z.object({
-  workspace,
-  depth: z.number().int().min(1).max(10).default(2).describe("How many directory levels deep to show (1-10, default 2)"),
-  path: z.string().default(".").describe("Start from a subdirectory instead of project root (e.g., 'src/features'). Default: '.'"),
-  include_stats: z.boolean().default(true).describe("Include function/class counts per directory and file (default: true)"),
 });
 
 export const StaleDocstringsSchema = z.object({
