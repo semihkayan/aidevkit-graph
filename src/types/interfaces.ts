@@ -32,6 +32,7 @@ export interface IFunctionIndexWriter {
   refreshStale(projectRoot: string): Promise<string[]>;
   loadFromDisk(): Promise<void>;
   saveToDisk(): Promise<void>;
+  clear(): void;
 }
 
 // === Source Extraction ===
@@ -114,6 +115,7 @@ export interface ICallGraphWriter {
   removeByFile(filePath: string, index: IFunctionIndexReader): void;
   saveToDisk(cacheDir: string, index: IFunctionIndexReader): Promise<void>;
   loadFromDisk(cacheDir: string, index: IFunctionIndexReader): Promise<boolean>;
+  clear(): void;
 }
 
 // === Type Graph ===
@@ -135,6 +137,7 @@ export interface ITypeGraphWriter {
   removeByFile(filePath: string): void;
   saveToDisk(cacheDir: string, index: IFunctionIndexReader): Promise<void>;
   loadFromDisk(cacheDir: string, index: IFunctionIndexReader): Promise<boolean>;
+  clear(): void;
 }
 
 // === Language Parser ===
@@ -146,6 +149,13 @@ export interface ILanguageParser {
   parseCalls(source: string, lineStart: number, lineEnd: number): RawCallInfo[];
   parseImports(source: string, filePath: string): RawImportInfo[];
   parseTypeRelationships(source: string, filePath: string): RawTypeRelationship[];
+
+  // Import resolution — languages that support path resolution implement these
+  resolveImportPath(
+    modulePath: string, fromFile: string, projectRoot: string,
+    pathExists: (workspaceRelativePath: string) => boolean,
+  ): string | null;
+  isExternalImport(modulePath: string): boolean;
 }
 
 // === Import Resolver ===
@@ -227,6 +237,16 @@ export interface NoiseFilterMetadata {
   noisePatterns: RegExp[];
 }
 
+export interface LanguageConventions {
+  readonly selfKeywords: ReadonlySet<string>;
+  readonly constructorNames: ReadonlySet<string>;
+  readonly returnTypePatterns: readonly RegExp[];
+  readonly sourceRoots: readonly string[];
+  readonly workspaceManifests: readonly string[];
+  readonly workspaceManifestExtensions: readonly string[];
+  readonly indexFileNames: readonly string[];
+}
+
 // === Workspace Services (per-workspace isolated) ===
 
 export interface WorkspaceServices {
@@ -252,6 +272,7 @@ export interface AppContext {
   readonly embedding: IEmbeddingProvider;
   readonly embeddingAvailable: boolean;
   readonly parsers: ILanguageParser[];
+  readonly conventions: LanguageConventions;
   readonly noiseFilter: NoiseFilterMetadata;
   readonly watcher: IFileWatcher;
   readonly git: IGitService;

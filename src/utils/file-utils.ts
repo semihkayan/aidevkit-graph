@@ -45,19 +45,15 @@ export async function globSourceFiles(projectRoot: string, config: Config): Prom
   return valid;
 }
 
-// Common source root prefixes to strip from module paths (order: longest first)
-const AUTO_SOURCE_ROOTS = [
-  "src/main/java/",
-  "src/main/kotlin/",
-  "src/test/java/",
-  "src/test/kotlin/",
+// Generic source root prefixes (language-specific roots come from LanguageConventions)
+const GENERIC_SOURCE_ROOTS = [
   "src/",
   "lib/",
   "app/",
 ];
 
 // Compute module path from file path
-export function computeModule(filePath: string, projectRoot: string, sourceRoot?: string): string {
+export function computeModule(filePath: string, projectRoot: string, sourceRoot?: string, languageSourceRoots?: readonly string[]): string {
   let relative = projectRoot ? path.relative(projectRoot, filePath) : filePath;
   // Normalize to forward slashes for consistent matching
   relative = relative.replace(/\\/g, "/");
@@ -66,8 +62,9 @@ export function computeModule(filePath: string, projectRoot: string, sourceRoot?
   if (sourceRoot && relative.startsWith(sourceRoot + "/")) {
     relative = relative.slice(sourceRoot.length + 1);
   } else if (!sourceRoot) {
-    // Auto-detect: strip common source root prefixes
-    for (const prefix of AUTO_SOURCE_ROOTS) {
+    // Auto-detect: strip source root prefixes (language-specific first, then generic)
+    const allRoots = [...(languageSourceRoots || []), ...GENERIC_SOURCE_ROOTS];
+    for (const prefix of allRoots) {
       if (relative.startsWith(prefix)) {
         relative = relative.slice(prefix.length);
         break;

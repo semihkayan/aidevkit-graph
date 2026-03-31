@@ -3,6 +3,7 @@ const require = createRequire(import.meta.url);
 import type { RawFunctionInfo, RawCallInfo, RawImportInfo, RawTypeRelationship, StructuralHints } from "../types/index.js";
 import type { TreeSitterLanguageConfig } from "./tree-sitter-parser.js";
 import { walkNodes, findParent, type SyntaxNode } from "./ast-utils.js";
+import { resolveRelativeImport } from "./resolve-utils.js";
 
 function getTsDecorators(node: SyntaxNode): string[] | undefined {
   // Class decorators: direct children of class_declaration
@@ -489,6 +490,26 @@ export const typescriptConfig: TreeSitterLanguageConfig = {
     "toJSON", "assign", "create", "freeze", "from", "isArray",
     "then", "catch", "finally",
   ],
+
+  // Language conventions
+  selfKeywords: ["this"],
+  constructorNames: ["constructor"],
+  returnTypePattern: /\)\s*:\s*(.+)$/,
+  sourceRoots: [],
+  workspaceManifests: ["package.json", "tsconfig.json"],
+  indexFileNames: ["index.ts", "index.tsx", "index.js", "index.jsx"],
+
+  // Import resolution
+  isExternalImport: (modulePath) => !modulePath.startsWith(".") && !modulePath.startsWith("/"),
+  resolveImportPath: (modulePath, fromFile, projectRoot, pathExists) => {
+    if (!modulePath.startsWith(".")) return null;
+    return resolveRelativeImport(
+      modulePath, fromFile, projectRoot,
+      [".ts", ".tsx", ".js", ".jsx"],
+      ["index.ts", "index.tsx", "index.js", "index.jsx"],
+      pathExists,
+    );
+  },
 };
 
 export const tsxConfig: TreeSitterLanguageConfig = {

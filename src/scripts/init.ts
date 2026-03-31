@@ -2,7 +2,7 @@
 
 import path from "node:path";
 import { loadConfig } from "../utils/config.js";
-import { createTreeSitterParsers, aggregateTestMetadata } from "../parsers/registry.js";
+import { createTreeSitterParsers, aggregateTestMetadata, aggregateLanguageConventions } from "../parsers/registry.js";
 import { FunctionIndex } from "../core/function-index.js";
 import { JsonFileRecordStore } from "../core/record-store-json.js";
 import { HashBasedStalenessChecker } from "../core/staleness-hash.js";
@@ -49,8 +49,9 @@ async function main() {
 
   const config = await loadConfig(resolvedRoot);
   const parsers = createTreeSitterParsers(config.parser);
+  const conventions = aggregateLanguageConventions(parsers);
   const docstringParser = new DocstringParser();
-  const workspacePaths = await detectWorkspaces(resolvedRoot, config.workspaces);
+  const workspacePaths = await detectWorkspaces(resolvedRoot, config.workspaces, conventions.workspaceManifests, conventions.workspaceManifestExtensions);
 
   console.log(`Code Intelligence — Initializing ${resolvedRoot}`);
   console.log(`Workspaces: ${workspacePaths.join(", ")}`);
@@ -75,7 +76,7 @@ async function main() {
 
     const recordStore = new JsonFileRecordStore(cacheDir);
     const staleness = new HashBasedStalenessChecker(config);
-    const index = new FunctionIndex(parsers, recordStore, staleness, docstringParser, config, wsRoot, aggregateTestMetadata(parsers));
+    const index = new FunctionIndex(parsers, recordStore, staleness, docstringParser, config, wsRoot, aggregateTestMetadata(parsers), conventions);
 
     if (!force) await index.loadFromDisk();
 
@@ -112,7 +113,7 @@ async function main() {
     // Build and save call graph + type graph
     const importResolver = new ImportResolver(parsers);
     const typeGraph = new TypeGraphManager();
-    const callGraph = new CallGraphManager(importResolver, parsers, typeGraph);
+    const callGraph = new CallGraphManager(importResolver, parsers, typeGraph, conventions);
 
     console.log(`[${wsPath}] Building type graph + call graph...`);
     const startGraph = Date.now();

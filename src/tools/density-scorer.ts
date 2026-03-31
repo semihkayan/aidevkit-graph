@@ -129,10 +129,11 @@ export function computeDensityScore(
 // === Constructor Detection ===
 
 /** Constructors declare dependencies but don't implement behavior */
-function isConstructor(record: FunctionRecord): boolean {
+function isConstructor(record: FunctionRecord, constructorNames?: ReadonlySet<string>): boolean {
   if (record.structuralHints?.isConstructor) return true;
+  if (!constructorNames) return false;
   const name = record.name.split(".").pop() || record.name;
-  return name === "constructor" || name === "__init__";
+  return constructorNames.has(name);
 }
 
 // === Accessor Detection (language-agnostic structural heuristic) ===
@@ -144,9 +145,9 @@ const NON_ACCESSOR_KINDS = new Set(["class", "interface", "enum", "struct", "rec
  * 1. Parser-confirmed: propertyAccess hint + small body (≤3 lines)
  * 2. Heuristic fallback: body ≤ 4 lines, 0-1 params, 0 total calls
  */
-export function isAccessor(record: FunctionRecord, callEntry: CallGraphEntry | undefined): boolean {
+export function isAccessor(record: FunctionRecord, callEntry: CallGraphEntry | undefined, constructorNames?: ReadonlySet<string>): boolean {
   if (NON_ACCESSOR_KINDS.has(record.kind)) return false;
-  if (isConstructor(record)) return false;
+  if (isConstructor(record, constructorNames)) return false;
   if (record.structuralHints?.isAbstract) return false; // No body by design
 
   const bodyLines = record.lineEnd - record.lineStart + 1;
@@ -177,7 +178,7 @@ export function applyDensityAdjustment(
   results: Array<{ score: number; record: FunctionRecord | null; [key: string]: unknown }>,
   ws: WorkspaceServices,
   config: Config,
-  options?: { skipTestPenalty?: boolean },
+  options?: { skipTestPenalty?: boolean; constructorNames?: ReadonlySet<string> },
 ): void {
   const densityConfig = config.search.density;
   if (!densityConfig.enabled) return;
@@ -199,12 +200,12 @@ export function applyDensityAdjustment(
     // Orthogonal penalties for low-information-density categories
 
     // Accessors: short body, few params, no project calls → pure data access, no behavior.
-    if (isAccessor(r.record, callEntry)) {
+    if (isAccessor(r.record, callEntry, options?.constructorNames)) {
       r.score *= accessorPenalty;
     }
 
     // Constructors: many params → high density score, but behavior is just assignment.
-    if (isConstructor(r.record)) {
+    if (isConstructor(r.record, options?.constructorNames)) {
       r.score *= constructorPenalty;
     }
 

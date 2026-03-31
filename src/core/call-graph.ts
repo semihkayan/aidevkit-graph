@@ -1,6 +1,6 @@
 import type {
   ICallGraphReader, ICallGraphWriter, IFunctionIndexReader, IImportResolver, ILanguageParser,
-  ITypeGraphReader,
+  ITypeGraphReader, LanguageConventions,
 } from "../types/interfaces.js";
 import type { CallGraph, CallGraphEntry } from "../types/index.js";
 import { readFile } from "../utils/file-utils.js";
@@ -9,12 +9,18 @@ import path from "node:path";
 
 export class CallGraphManager implements ICallGraphReader, ICallGraphWriter {
   private graph: CallGraph = new Map();
+  private selfKeywords: ReadonlySet<string>;
+  private typeGraph?: ITypeGraphReader;
 
   constructor(
     private importResolver: IImportResolver,
     private parsers: ILanguageParser[],
-    private typeGraph?: ITypeGraphReader,
-  ) {}
+    typeGraph: ITypeGraphReader | undefined,
+    private conventions: LanguageConventions,
+  ) {
+    this.typeGraph = typeGraph;
+    this.selfKeywords = conventions.selfKeywords;
+  }
 
   // === ICallGraphWriter ===
 
@@ -218,7 +224,7 @@ export class CallGraphManager implements ICallGraphReader, ICallGraphWriter {
       if (imp?.resolvedPath) return imp.resolvedPath;
 
       // self.method() / this.method() — same file
-      if (call.objectName === "self" || call.objectName === "this") return null; // Resolved via function name matching
+      if (this.selfKeywords.has(call.objectName)) return null; // Resolved via function name matching
     } else {
       // Direct call: funcName() — check imports
       const imp = imports.get(call.name);
@@ -239,7 +245,7 @@ export class CallGraphManager implements ICallGraphReader, ICallGraphWriter {
             r.name === targetName || r.name.endsWith(`.${targetName}`)
           );
           if (match) call.resolvedId = match.id;
-        } else if (call.target.startsWith("self.") || call.target.startsWith("this.")) {
+        } else if (this.selfKeywords.has(call.target.split(".")[0])) {
           // self.method() or this.method() — find in same file only
           const methodName = call.target.split(".").pop()!;
           const callerRecord = index.getById(_callerId);
@@ -277,8 +283,8 @@ export class CallGraphManager implements ICallGraphReader, ICallGraphWriter {
     const callerRecord = index.getById(callerId);
     if (!callerRecord) return null;
 
-    // Pattern 1: this.field.method() — 3+ parts starting with this/self
-    if (parts[0] === "this" || parts[0] === "self") {
+    // Pattern 1: this.field.method() — 3+ parts starting with self-reference keyword
+    if (this.selfKeywords.has(parts[0])) {
       if (parts.length < 3) return null;
 
       // Find the caller's class name

@@ -1,4 +1,4 @@
-import type { AppContext, WorkspaceServices } from "../types/interfaces.js";
+import type { AppContext, WorkspaceServices, LanguageConventions } from "../types/interfaces.js";
 import type { FunctionRecord } from "../types/index.js";
 import { findSimilar } from "../utils/string-similarity.js";
 
@@ -77,7 +77,10 @@ export function resolveFunctionAcrossWorkspaces(
   const matches: Array<ResolvedWorkspace & { record: FunctionRecord }> = [];
 
   for (const { ws, wsPath } of resolved.workspaces) {
-    const fn = resolveFunctionOrError(ws, name, module);
+    const fn = resolveFunctionOrError(ws, name, module, {
+      conventions: ctx.conventions,
+      allExtensions: Object.values(ctx.config.parser.languages).flat(),
+    });
     if ("error" in fn) {
       // Propagate AMBIGUOUS_FUNCTION immediately — agent needs to disambiguate
       const errText = fn.error.content[0]?.text || "";
@@ -131,17 +134,16 @@ export function resolveFunctionOrError(
   ws: WorkspaceServices,
   name: string,
   module?: string,
+  options?: { conventions?: LanguageConventions; allExtensions?: string[] },
 ): { record: import("../types/index.js").FunctionRecord } | { error: ReturnType<typeof errorResponse> } {
+  const exts = options?.allExtensions ?? [];
   let matches = ws.index.findByName(name, module);
 
   // If module didn't match as a module path, try it as a file path hint
   if (matches.length === 0 && module) {
     const allMatches = ws.index.findByName(name);
     const byFile = allMatches.filter(r =>
-      r.filePath.includes(module) || r.filePath.endsWith(module + ".ts") ||
-      r.filePath.endsWith(module + ".py") || r.filePath.endsWith(module + ".js") ||
-      r.filePath.endsWith(module + ".java") || r.filePath.endsWith(module + ".go") ||
-      r.filePath.endsWith(module + ".rs") || r.filePath.endsWith(module + ".cs")
+      r.filePath.includes(module) || exts.some(ext => r.filePath.endsWith(module + ext))
     );
     if (byFile.length > 0) matches = byFile;
   }
@@ -155,7 +157,7 @@ export function resolveFunctionOrError(
     const classRec = classRecords.find(r => r.kind === "class" || r.kind === "interface");
     if (classRec?.classInfo?.methods) {
       for (const methodName of classRec.classInfo.methods) {
-        if (methodName === "constructor" || methodName === "__init__") continue;
+        if (options?.conventions?.constructorNames?.has(methodName)) continue;
         const mLower = methodName.toLowerCase();
         if (mLower === methodAttempt || methodAttempt.startsWith(mLower) || mLower.startsWith(methodAttempt)) {
           matches.push(...ws.index.findByExactName(`${className}.${methodName}`));
@@ -196,10 +198,7 @@ export function resolveFunctionOrError(
     // If module was given but still ambiguous, check if module is a file path hint
     if (module) {
       const fileMatch = disambiguated.find(r =>
-        r.filePath.includes(module) || r.filePath.endsWith(module + ".ts") ||
-        r.filePath.endsWith(module + ".py") || r.filePath.endsWith(module + ".js") ||
-        r.filePath.endsWith(module + ".java") || r.filePath.endsWith(module + ".go") ||
-        r.filePath.endsWith(module + ".rs") || r.filePath.endsWith(module + ".cs")
+        r.filePath.includes(module) || exts.some(ext => r.filePath.endsWith(module + ext))
       );
       if (fileMatch) return { record: fileMatch };
     }

@@ -2,7 +2,7 @@
 
 import path from "node:path";
 import { loadConfig } from "../utils/config.js";
-import { createTreeSitterParsers, aggregateTestMetadata } from "../parsers/registry.js";
+import { createTreeSitterParsers, aggregateTestMetadata, aggregateLanguageConventions } from "../parsers/registry.js";
 import { FunctionIndex } from "../core/function-index.js";
 import { JsonFileRecordStore } from "../core/record-store-json.js";
 import { HashBasedStalenessChecker } from "../core/staleness-hash.js";
@@ -24,8 +24,9 @@ async function main() {
   const resolvedRoot = path.resolve(".");
   const config = await loadConfig(resolvedRoot);
   const parsers = createTreeSitterParsers(config.parser);
+  const conventions = aggregateLanguageConventions(parsers);
   const docstringParser = new DocstringParser();
-  const workspacePaths = await detectWorkspaces(resolvedRoot, config.workspaces);
+  const workspacePaths = await detectWorkspaces(resolvedRoot, config.workspaces, conventions.workspaceManifests, conventions.workspaceManifestExtensions);
 
   // Determine files to reindex
   let targetFiles: string[] | null = null;
@@ -45,7 +46,7 @@ async function main() {
 
     const recordStore = new JsonFileRecordStore(cacheDir);
     const staleness = new HashBasedStalenessChecker(config);
-    const index = new FunctionIndex(parsers, recordStore, staleness, docstringParser, config, wsRoot, aggregateTestMetadata(parsers));
+    const index = new FunctionIndex(parsers, recordStore, staleness, docstringParser, config, wsRoot, aggregateTestMetadata(parsers), conventions);
     await index.loadFromDisk();
 
     let changedIds: string[];
@@ -85,7 +86,7 @@ async function main() {
     // Rebuild and save call graph + type graph
     const importResolver = new ImportResolver(parsers);
     const typeGraph = new TypeGraphManager();
-    const callGraph = new CallGraphManager(importResolver, parsers, typeGraph);
+    const callGraph = new CallGraphManager(importResolver, parsers, typeGraph, conventions);
 
     // Type graph first — call graph uses it for interface-based resolution
     await typeGraph.build(index, parsers, wsRoot);

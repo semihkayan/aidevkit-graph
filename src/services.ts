@@ -5,7 +5,7 @@ import { SourceExtractor } from "./core/source-extractor.js";
 import { JsonFileRecordStore } from "./core/record-store-json.js";
 import { HashBasedStalenessChecker } from "./core/staleness-hash.js";
 import { DocstringParser } from "./core/docstring-parser.js";
-import { createTreeSitterParsers, aggregateTestMetadata, aggregateNoiseMetadata } from "./parsers/registry.js";
+import { createTreeSitterParsers, aggregateTestMetadata, aggregateNoiseMetadata, aggregateLanguageConventions } from "./parsers/registry.js";
 import { ImportResolver } from "./core/import-resolver.js";
 import { CallGraphManager } from "./core/call-graph.js";
 import { OllamaEmbeddingProvider } from "./core/embedders/ollama.js";
@@ -23,15 +23,19 @@ import { logger } from "./utils/logger.js";
 export async function createServices(projectRoot?: string): Promise<AppContext> {
   const config = await loadConfig(projectRoot);
 
-  // Workspace detection
-  const workspacePaths = await detectWorkspaces(config.projectRoot, config.workspaces);
-  const isMultiWorkspace = workspacePaths.length > 1;
-  logger.info({ workspaces: workspacePaths }, `Detected ${workspacePaths.length} workspace(s)`);
-
-  // Shared services
+  // Shared services — parsers first (needed for workspace detection via conventions)
   const parsers = createTreeSitterParsers(config.parser);
   const testMetadata = aggregateTestMetadata(parsers);
   const noiseFilter = aggregateNoiseMetadata(parsers);
+  const conventions = aggregateLanguageConventions(parsers);
+
+  // Workspace detection — uses manifests from parser conventions
+  const workspacePaths = await detectWorkspaces(
+    config.projectRoot, config.workspaces,
+    conventions.workspaceManifests, conventions.workspaceManifestExtensions,
+  );
+  const isMultiWorkspace = workspacePaths.length > 1;
+  logger.info({ workspaces: workspacePaths }, `Detected ${workspacePaths.length} workspace(s)`);
   const docstringParser = new DocstringParser();
   const embedding = new OllamaEmbeddingProvider(
     config.embedding.ollamaUrl,
@@ -40,7 +44,7 @@ export async function createServices(projectRoot?: string): Promise<AppContext> 
     config.embedding.instruction,
   );
   const merger = new RRFMerger(config.search.rrfK);
-  const reindexOrchestrator = new ReindexOrchestrator(embedding, parsers, config);
+  const reindexOrchestrator = new ReindexOrchestrator(embedding, parsers, config, conventions);
 
   // File watcher — routes files to correct workspace, delegates to orchestrator
   const watcher = new FileWatcher(config, async (changedFiles: string[]) => {
@@ -70,7 +74,7 @@ export async function createServices(projectRoot?: string): Promise<AppContext> 
 
     const recordStore = new JsonFileRecordStore(cacheDir);
     const staleness = new HashBasedStalenessChecker(config);
-    const functionIndex = new FunctionIndex(parsers, recordStore, staleness, docstringParser, config, wsRoot, testMetadata);
+    const functionIndex = new FunctionIndex(parsers, recordStore, staleness, docstringParser, config, wsRoot, testMetadata, conventions);
     const sourceExtractor = new SourceExtractor(functionIndex, wsRoot);
 
     // Vector DB + Search pipeline — real implementation
@@ -80,7 +84,7 @@ export async function createServices(projectRoot?: string): Promise<AppContext> 
     // Call graph + type graph — real implementation
     const importResolver = new ImportResolver(parsers);
     const typeGraphManager = new TypeGraphManager();
-    const callGraphManager = new CallGraphManager(importResolver, parsers, typeGraphManager);
+    const callGraphManager = new CallGraphManager(importResolver, parsers, typeGraphManager, conventions);
 
     workspaces.set(wsPath, {
       index: functionIndex,
@@ -119,6 +123,7 @@ export async function createServices(projectRoot?: string): Promise<AppContext> 
     embedding,
     embeddingAvailable: await embedding.isAvailable(),
     parsers,
+    conventions,
     noiseFilter,
     watcher,
     git: new GitService(),

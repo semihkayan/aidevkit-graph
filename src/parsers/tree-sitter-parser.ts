@@ -24,6 +24,24 @@ export interface TreeSitterLanguageConfig {
   noiseTargets?: string[];
   builtinMethods?: string[];
   noisePatterns?: RegExp[];
+
+  // Language conventions (optional — aggregated into LanguageConventions at startup)
+  selfKeywords?: string[];
+  constructorNames?: string[];
+  returnTypePattern?: RegExp;
+  sourceRoots?: string[];
+  workspaceManifests?: string[];
+  workspaceManifestExtensions?: string[];
+  indexFileNames?: string[];
+
+  // Import resolution (optional — called by ImportResolver per-file)
+  resolveImportPath?(
+    modulePath: string,
+    fromFile: string,
+    projectRoot: string,
+    pathExists: (workspaceRelativePath: string) => boolean,
+  ): string | null;
+  isExternalImport?(modulePath: string): boolean;
 }
 
 export class TreeSitterParser implements ILanguageParser {
@@ -72,4 +90,25 @@ export class TreeSitterParser implements ILanguageParser {
   get noiseTargets(): string[] { return this.config.noiseTargets ?? []; }
   get builtinMethods(): string[] { return this.config.builtinMethods ?? []; }
   get noisePatterns(): RegExp[] { return this.config.noisePatterns ?? []; }
+
+  // Convention getters — aggregated into LanguageConventions at startup
+  get selfKeywords(): string[] { return this.config.selfKeywords ?? []; }
+  get constructorNames(): string[] { return this.config.constructorNames ?? []; }
+  get returnTypePattern(): RegExp | null { return this.config.returnTypePattern ?? null; }
+  get sourceRoots(): string[] { return this.config.sourceRoots ?? []; }
+  get workspaceManifests(): string[] { return this.config.workspaceManifests ?? []; }
+  get workspaceManifestExtensions(): string[] { return this.config.workspaceManifestExtensions ?? []; }
+  get indexFileNames(): string[] { return this.config.indexFileNames ?? []; }
+
+  // Import resolution — pass-through to config
+  resolveImportPath(
+    modulePath: string, fromFile: string, projectRoot: string,
+    pathExists: (workspaceRelativePath: string) => boolean,
+  ): string | null {
+    return this.config.resolveImportPath?.(modulePath, fromFile, projectRoot, pathExists) ?? null;
+  }
+
+  isExternalImport(modulePath: string): boolean {
+    return this.config.isExternalImport?.(modulePath) ?? false;
+  }
 }

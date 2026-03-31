@@ -203,4 +203,9 @@ export const csharpConfig: TreeSitterLanguageConfig = {
   noisePatterns: [
     /^(Console|Convert|Guid|DateTime|DateTimeOffset|TimeSpan|Task|Math|Enum|Path|File|Directory|Regex|StringBuilder|Activator|GC|Monitor|Interlocked|CancellationToken|JsonSerializer|Environment)\.\w+$/,
   ],
+
+  // Language conventions
+  selfKeywords: ["this"],
+  constructorNames: ["constructor"],
+  workspaceManifestExtensions: [".csproj", ".sln"],
 };

@@ -1,7 +1,7 @@
 import path from "node:path";
 import type {
   IReindexOrchestrator, IEmbeddingProvider, ILanguageParser,
-  WorkspaceServices, Config, ReindexResult,
+  WorkspaceServices, Config, ReindexResult, LanguageConventions,
 } from "../types/interfaces.js";
 import { reembedFunctions } from "./reembed.js";
 import { logger } from "../utils/logger.js";
@@ -11,6 +11,7 @@ export class ReindexOrchestrator implements IReindexOrchestrator {
     private embedding: IEmbeddingProvider,
     private parsers: ILanguageParser[],
     private config: Config,
+    private conventions: LanguageConventions,
   ) {}
 
   async reindexFull(ws: WorkspaceServices, wsPath: string): Promise<ReindexResult> {
@@ -98,7 +99,7 @@ export class ReindexOrchestrator implements IReindexOrchestrator {
     // Re-embed changed functions (now has updated call graph for chunk enrichment)
     try {
       if (await this.embedding.isAvailable()) {
-        await reembedFunctions(changedIds, ws.index, this.embedding, ws.vectorDb, this.config, ws.callGraph);
+        await reembedFunctions(changedIds, ws.index, this.embedding, ws.vectorDb, this.config, ws.callGraph, this.conventions.returnTypePatterns);
       }
     } catch (err) {
       logger.warn({ err }, "Watcher re-embed failed");
@@ -115,7 +116,7 @@ export class ReindexOrchestrator implements IReindexOrchestrator {
   private async embedIfAvailable(ids: string[], ws: WorkspaceServices): Promise<number> {
     try {
       if (await this.embedding.isAvailable()) {
-        await reembedFunctions(ids, ws.index, this.embedding, ws.vectorDb, this.config, ws.callGraph);
+        await reembedFunctions(ids, ws.index, this.embedding, ws.vectorDb, this.config, ws.callGraph, this.conventions.returnTypePatterns);
         return ids.length;
       }
     } catch (err) {

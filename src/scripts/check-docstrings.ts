@@ -2,7 +2,7 @@
 
 import path from "node:path";
 import { loadConfig } from "../utils/config.js";
-import { createTreeSitterParsers, aggregateTestMetadata } from "../parsers/registry.js";
+import { createTreeSitterParsers, aggregateTestMetadata, aggregateLanguageConventions } from "../parsers/registry.js";
 import { FunctionIndex } from "../core/function-index.js";
 import { JsonFileRecordStore } from "../core/record-store-json.js";
 import { HashBasedStalenessChecker } from "../core/staleness-hash.js";
@@ -16,9 +16,10 @@ async function main() {
   const resolvedRoot = path.resolve(".");
   const config = await loadConfig(resolvedRoot);
   const parsers = createTreeSitterParsers(config.parser);
+  const conventions = aggregateLanguageConventions(parsers);
   const docstringParser = new DocstringParser();
   const { detectWorkspaces } = await import("../core/workspace-detector.js");
-  const workspacePaths = await detectWorkspaces(resolvedRoot, config.workspaces);
+  const workspacePaths = await detectWorkspaces(resolvedRoot, config.workspaces, conventions.workspaceManifests, conventions.workspaceManifestExtensions);
 
   let issues = 0;
 
@@ -30,7 +31,7 @@ async function main() {
 
     const recordStore = new JsonFileRecordStore(cacheDir);
     const staleness = new HashBasedStalenessChecker(config);
-    const index = new FunctionIndex(parsers, recordStore, staleness, docstringParser, config, wsRoot, aggregateTestMetadata(parsers));
+    const index = new FunctionIndex(parsers, recordStore, staleness, docstringParser, config, wsRoot, aggregateTestMetadata(parsers), conventions);
     await index.loadFromDisk();
 
     if (index.getStats().files === 0) {

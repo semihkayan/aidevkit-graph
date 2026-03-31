@@ -10,4 +10,5 @@ export const javascriptConfig: TreeSitterLanguageConfig = {
   grammar: require("tree-sitter-javascript"),
   extensions: [".js", ".jsx"],
   testImportPrefixes: [...(typescriptConfig.testImportPrefixes || []), "mocha", "chai"],
+  workspaceManifests: ["package.json"],
 };

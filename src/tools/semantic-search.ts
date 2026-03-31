@@ -1,4 +1,4 @@
-import type { AppContext, WorkspaceServices } from "../types/interfaces.js";
+import type { AppContext, WorkspaceServices, LanguageConventions } from "../types/interfaces.js";
 import type { FunctionRecord } from "../types/index.js";
 import { resolveWorkspaces, textResponse } from "./tool-utils.js";
 import { applyDensityAdjustment, countParamsFromSignature } from "./density-scorer.js";
@@ -16,11 +16,11 @@ function queryTargetsTests(query: string): boolean {
  * Generate a brief summary from function metadata when no docstring exists.
  * Gives the agent enough context to triage search results without opening source.
  */
-function buildAutoSummary(record: FunctionRecord): string {
+function buildAutoSummary(record: FunctionRecord, conventions?: LanguageConventions): string {
   // Class: show inheritance and method names so agent sees what the class offers
   if (record.kind === "class") {
     const methods = (record.classInfo?.methods || [])
-      .filter(m => m !== "constructor" && m !== "__init__");
+      .filter(m => !conventions?.constructorNames?.has(m));
     const inheritsInfo = record.classInfo?.inherits?.length
       ? ` extends ${record.classInfo.inherits.join(", ")}` : "";
     const shown = methods.slice(0, 5).join(", ");
@@ -43,9 +43,17 @@ function buildAutoSummary(record: FunctionRecord): string {
   const paramCount = countParamsFromSignature(record.signature);
   if (paramCount > 0) parts.push(`${paramCount} param${paramCount !== 1 ? "s" : ""}`);
 
-  // Return type
-  const retMatch = record.signature.match(/\)\s*(?:->|:)\s*(.+)$/);
-  if (retMatch) parts.push(`→ ${retMatch[1].trim()}`);
+  // Return type — try convention patterns first, fallback to combined regex
+  let retType: string | null = null;
+  for (const pattern of conventions?.returnTypePatterns ?? []) {
+    const m = record.signature.match(pattern);
+    if (m) { retType = m[1].trim(); break; }
+  }
+  if (!retType) {
+    const m = record.signature.match(/\)\s*(?:->|:)\s*(.+)$/);
+    if (m) retType = m[1].trim();
+  }
+  if (retType) parts.push(`→ ${retType}`);
 
   // Visibility
   if (record.visibility === "private") parts.push("(private)");
@@ -105,7 +113,7 @@ async function searchSingleWorkspace(
     .map(r => {
       const record = ws.index.getById(r.id);
       if (!record) { desyncCount++; return null; }
-      const summary = r.summary || buildAutoSummary(record);
+      const summary = r.summary || buildAutoSummary(record, ctx.conventions);
       return {
         function: r.name,
         file: r.filePath,
@@ -123,7 +131,10 @@ async function searchSingleWorkspace(
     .filter((r): r is NonNullable<typeof r> => r !== null);
 
   // Apply information density adjustments per-workspace (centrality is workspace-local).
-  applyDensityAdjustment(enriched, ws, ctx.config, { skipTestPenalty: queryTargetsTests(query) });
+  applyDensityAdjustment(enriched, ws, ctx.config, {
+    skipTestPenalty: queryTargetsTests(query),
+    constructorNames: ctx.conventions.constructorNames,
+  });
 
   return { results: enriched, desyncCount };
 }

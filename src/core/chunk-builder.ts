@@ -4,6 +4,7 @@ import { truncateToTokens } from "../utils/token-estimator.js";
 export interface ChunkConfig {
   expandCamelCase: boolean;
   maxChunkTokens?: number;
+  returnTypePatterns?: readonly RegExp[];
 }
 
 /**
@@ -67,7 +68,7 @@ export function buildChunk(
     // Docstring-free: extract param/return info from signature (no labels)
     const paramInfo = extractParamInfo(record.signature);
     if (paramInfo) parts.push(paramInfo);
-    const returnInfo = extractReturnType(record.signature);
+    const returnInfo = extractReturnType(record.signature, config.returnTypePatterns);
     if (returnInfo) parts.push(returnInfo);
   }
 
@@ -100,12 +101,17 @@ function extractParamInfo(signature: string): string | null {
   return null;
 }
 
-function extractReturnType(signature: string): string | null {
-  const pyMatch = signature.match(/\)\s*->\s*(.+)$/);
-  if (pyMatch) return pyMatch[1].trim();
-  const tsMatch = signature.match(/\)\s*:\s*(.+)$/);
-  if (tsMatch) return tsMatch[1].trim();
-  return null;
+function extractReturnType(signature: string, patterns?: readonly RegExp[]): string | null {
+  if (patterns && patterns.length > 0) {
+    for (const pattern of patterns) {
+      const match = signature.match(pattern);
+      if (match) return match[1].trim();
+    }
+    return null;
+  }
+  // Fallback when no patterns provided
+  const match = signature.match(/\)\s*(?:->|:)\s*(.+)$/);
+  return match ? match[1].trim() : null;
 }
 
 export function expandIdentifiers(text: string): string {

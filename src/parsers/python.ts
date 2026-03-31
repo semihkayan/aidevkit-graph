@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import path from "node:path";
 import type { RawFunctionInfo, RawCallInfo, RawImportInfo, RawTypeRelationship, StructuralHints } from "../types/index.js";
 import type { TreeSitterLanguageConfig } from "./tree-sitter-parser.js";
 import { walkNodes, findParent, type SyntaxNode } from "./ast-utils.js";
@@ -276,4 +277,38 @@ export const pythonConfig: TreeSitterLanguageConfig = {
   noisePatterns: [
     /^(os|os\.path|sys|io|pathlib|typing|abc|dataclasses|functools|itertools|collections|math|random|shutil|glob|subprocess|tempfile|unittest|pytest)\.\w+$/,
   ],
+
+  // Language conventions
+  selfKeywords: ["self"],
+  constructorNames: ["__init__"],
+  returnTypePattern: /\)\s*->\s*(.+)$/,
+  sourceRoots: [],
+  workspaceManifests: ["pyproject.toml", "requirements.txt", "setup.py"],
+  indexFileNames: ["__init__.py"],
+
+  // Import resolution
+  isExternalImport: (modulePath) => !modulePath.startsWith("."),
+  resolveImportPath: (modulePath, fromFile, _projectRoot, pathExists) => {
+    if (modulePath.startsWith(".")) {
+      // Relative: from .foo import Bar
+      const fromDir = path.dirname(fromFile);
+      const dotMatch = modulePath.match(/^(\.+)/);
+      const dots = dotMatch ? dotMatch[1].length : 1;
+      let base = fromDir;
+      for (let i = 1; i < dots; i++) base = path.dirname(base);
+      const rest = modulePath.slice(dots).replace(/\./g, "/");
+      const target = rest ? path.join(base, rest) : base;
+      for (const c of [target + ".py", path.join(target, "__init__.py")]) {
+        const normalized = c.replace(/\\/g, "/");
+        if (pathExists(normalized)) return normalized;
+      }
+      return null;
+    }
+    // Absolute: import foo.bar
+    const pyPath = modulePath.replace(/\./g, "/");
+    for (const c of [pyPath + ".py", pyPath + "/__init__.py"]) {
+      if (pathExists(c)) return c;
+    }
+    return null;
+  },
 };

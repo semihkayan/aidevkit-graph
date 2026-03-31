@@ -69,6 +69,7 @@ export async function reembedFunctions(
   vectorDb: IVectorDatabase,
   config: Config,
   callGraph?: ICallGraphReader,
+  returnTypePatterns?: readonly RegExp[],
 ): Promise<void> {
   const records = changedIds
     .map(id => index.getById(id))
@@ -79,6 +80,7 @@ export async function reembedFunctions(
   const chunkConfig = {
     expandCamelCase: config.search.expandCamelCase,
     maxChunkTokens: config.indexing.maxChunkTokens,
+    returnTypePatterns,
   };
 
   // Resolve class context for methods, then build chunks

@@ -173,4 +173,10 @@ export const rustConfig: TreeSitterLanguageConfig = {
   noisePatterns: [
     /^(String|Vec|HashMap|HashSet|BTreeMap|BTreeSet|Box|Arc|Rc|Mutex|RwLock|Cell|RefCell|Option|Result|Cow|Pin)\.\w+$/,
   ],
+
+  // Language conventions
+  selfKeywords: ["self"],
+  constructorNames: ["new"],
+  returnTypePattern: /\)\s*->\s*(.+)$/,
+  workspaceManifests: ["Cargo.toml"],
 };

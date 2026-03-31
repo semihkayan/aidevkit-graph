@@ -1,4 +1,4 @@
-import type { Config, TestDetectionMetadata, NoiseFilterMetadata } from "../types/interfaces.js";
+import type { Config, TestDetectionMetadata, NoiseFilterMetadata, LanguageConventions } from "../types/interfaces.js";
 import { TreeSitterParser } from "./tree-sitter-parser.js";
 import { logger } from "../utils/logger.js";
 import { pythonConfig } from "./python.js";
@@ -81,4 +81,32 @@ export function aggregateNoiseMetadata(parsers: TreeSitterParser[]): NoiseFilter
   }
 
   return { noiseTargets, builtinMethods, noisePatterns };
+}
+
+export function aggregateLanguageConventions(parsers: TreeSitterParser[]): LanguageConventions {
+  const selfKeywords = new Set<string>();
+  const constructorNames = new Set<string>();
+  const returnTypePatterns: RegExp[] = [];
+  const sourceRoots: string[] = [];
+  const workspaceManifests: string[] = [];
+  const workspaceManifestExtensions: string[] = [];
+  const indexFileNames: string[] = [];
+
+  for (const p of parsers) {
+    for (const k of p.selfKeywords) selfKeywords.add(k);
+    for (const n of p.constructorNames) constructorNames.add(n);
+    if (p.returnTypePattern) returnTypePatterns.push(p.returnTypePattern);
+    for (const r of p.sourceRoots) { if (!sourceRoots.includes(r)) sourceRoots.push(r); }
+    for (const m of p.workspaceManifests) { if (!workspaceManifests.includes(m)) workspaceManifests.push(m); }
+    for (const e of p.workspaceManifestExtensions) { if (!workspaceManifestExtensions.includes(e)) workspaceManifestExtensions.push(e); }
+    for (const i of p.indexFileNames) { if (!indexFileNames.includes(i)) indexFileNames.push(i); }
+  }
+
+  // Sort sourceRoots longest-first for correct prefix stripping
+  sourceRoots.sort((a, b) => b.length - a.length);
+
+  return {
+    selfKeywords, constructorNames, returnTypePatterns, sourceRoots,
+    workspaceManifests, workspaceManifestExtensions, indexFileNames,
+  };
 }

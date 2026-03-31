@@ -4,7 +4,7 @@ import ignore from "ignore";
 import type {
   IFunctionIndexReader, IFunctionIndexWriter, ILanguageParser,
   IRecordStore, IStalenessChecker, IDocstringParser, Config,
-  TestDetectionMetadata,
+  TestDetectionMetadata, LanguageConventions,
 } from "../types/interfaces.js";
 import type { FunctionRecord } from "../types/index.js";
 import { readFile, computeModule, detectLanguage } from "../utils/file-utils.js";
@@ -56,6 +56,7 @@ export class FunctionIndex implements IFunctionIndexReader, IFunctionIndexWriter
     private config: Config,
     public readonly projectRoot: string,
     private testMetadata: TestDetectionMetadata,
+    private conventions: LanguageConventions,
   ) {}
 
   // === IFunctionIndexReader ===
@@ -197,7 +198,7 @@ export class FunctionIndex implements IFunctionIndexReader, IFunctionIndexWriter
     for (const { record: classRec, score } of candidates) {
       if (score < topScore - 1) break;
       for (const methodName of classRec.classInfo?.methods || []) {
-        if (methodName === "constructor" || methodName === "__init__") continue;
+        if (this.conventions.constructorNames.has(methodName)) continue;
         const mLower = methodName.toLowerCase();
         if (mLower === verb || verb.startsWith(mLower) || mLower.startsWith(verb)) {
           const fullName = `${classRec.name}.${methodName}`;
@@ -467,7 +468,7 @@ export class FunctionIndex implements IFunctionIndexReader, IFunctionIndexWriter
       ? this.docstringParser.parse(raw.docstring, raw.kind === "class" ? "class" : "function")
       : null;
     // filePath is already relative — computeModule needs "." as base since path is relative
-    const module = computeModule(filePath, "", this.config.parser.sourceRoot);
+    const module = computeModule(filePath, "", this.config.parser.sourceRoot, this.conventions.sourceRoots);
     const language = detectLanguage(filePath, this.config.parser.languages) || "unknown";
 
     return {

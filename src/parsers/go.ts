@@ -163,4 +163,9 @@ export const goConfig: TreeSitterLanguageConfig = {
   noisePatterns: [
     /^(fmt|errors|context|strings|strconv|filepath|sync|log|math|sort|io|bytes|os|time|reflect|regexp|testing|net|http|encoding)\.\w+$/,
   ],
+
+  // Language conventions
+  selfKeywords: [],
+  constructorNames: [],
+  workspaceManifests: ["go.mod"],
 };

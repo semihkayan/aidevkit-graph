@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
+import path from "node:path";
 import type { RawFunctionInfo, RawCallInfo, RawImportInfo, RawTypeRelationship, StructuralHints } from "../types/index.js";
 import type { TreeSitterLanguageConfig } from "./tree-sitter-parser.js";
 import { walkNodes, findParent, type SyntaxNode } from "./ast-utils.js";
@@ -247,4 +248,23 @@ export const javaConfig: TreeSitterLanguageConfig = {
   noisePatterns: [
     /^(System|Math|Arrays|Collections|Objects|Optional|Stream|Collectors|Integer|Long|Double|Float|String|Boolean|Character|BigDecimal|BigInteger|UUID|Instant|Duration|LocalDate|LocalDateTime|ZonedDateTime|Date|TimeUnit|Pattern|Matcher|StringBuilder|StringBuffer|Thread|Executors|CompletableFuture|AtomicInteger|AtomicLong|ResponseEntity|HttpStatus)\.\w+$/,
   ],
+
+  // Language conventions
+  selfKeywords: ["this"],
+  constructorNames: ["constructor"],
+  sourceRoots: ["src/main/java/", "src/test/java/", "src/main/kotlin/", "src/test/kotlin/"],
+  workspaceManifests: ["build.gradle", "build.gradle.kts", "pom.xml"],
+
+  // Import resolution
+  isExternalImport: (modulePath) =>
+    /^(java|javax|org\.springframework|org\.junit|org\.mockito|org\.slf4j|org\.hibernate|jakarta)\./.test(modulePath),
+  resolveImportPath: (modulePath, _fromFile, _projectRoot, pathExists) => {
+    const javaPath = modulePath.replace(/\./g, "/") + ".java";
+    for (const srcRoot of ["src/main/java", "src/test/java", "src"]) {
+      const candidate = path.join(srcRoot, javaPath).replace(/\\/g, "/");
+      if (pathExists(candidate)) return candidate;
+    }
+    if (pathExists(javaPath)) return javaPath;
+    return null;
+  },
 };
