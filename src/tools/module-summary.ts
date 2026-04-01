@@ -100,8 +100,19 @@ function buildModuleOutput(
     );
   }
 
-  const threshold = ctx?.config.moduleSummary || { compactThreshold: 20, filesOnlyThreshold: 50, maxTokenBudget: 4000 };
+  const threshold = ctx?.config.moduleSummary || { compactThreshold: 20, filesOnlyThreshold: 50, overviewThreshold: 200, maxTokenBudget: 50000 };
   const groupBy = requestedGroupBy || "auto";
+
+  // Resolve mode for total record set
+  const totalMode = resolveDetailMode(detail, filtered.length, threshold);
+
+  // Overview: counts-only per-submodule output for very large scopes.
+  // Short-circuits before submodule grouping — fundamentally different output level.
+  if (totalMode === "overview" && !file) {
+    const result = buildOverview(module, filtered);
+    if (testFilesExcluded > 0) result.test_files_excluded = testFilesExcluded;
+    return applyBudgetGuard(result, threshold.maxTokenBudget);
+  }
 
   // Determine if submodule grouping should activate
   const submoduleGroups = groupBySubmodule(filtered);
@@ -120,8 +131,10 @@ function buildModuleOutput(
       .sort(([a], [b]) => a === "(root)" ? -1 : b === "(root)" ? 1 : a.localeCompare(b))
       .map(([submodule, recs]) => {
         const mode = resolveDetailMode(detail, recs.length, threshold);
-        const built = buildForMode(module, recs, mode);
-        return { submodule, mode, total: recs.length, files: (built as any).files };
+        // Cap at files_only — overview is a module-level concept, not per-submodule
+        const effectiveMode = mode === "overview" ? "files_only" : mode;
+        const built = buildForMode(module, recs, effectiveMode);
+        return { submodule, mode: effectiveMode, total: recs.length, files: (built as any).files };
       });
 
     const result: Record<string, unknown> = {
@@ -131,38 +144,99 @@ function buildModuleOutput(
       submodules,
     };
     if (testFilesExcluded > 0) result.test_files_excluded = testFilesExcluded;
-    return result;
+    return applyBudgetGuard(result, threshold.maxTokenBudget);
   }
 
   // File-based grouping (current behavior)
-  const mode = resolveDetailMode(detail, filtered.length, threshold);
+  // Cap at files_only if overview resolved outside of short-circuit path (e.g., file param set)
+  const mode = totalMode === "overview" ? "files_only" : totalMode;
   const result = buildForMode(module, filtered, mode);
 
   if (testFilesExcluded > 0) {
     (result as any).test_files_excluded = testFilesExcluded;
   }
 
-  return result;
+  return applyBudgetGuard(result as Record<string, unknown>, threshold.maxTokenBudget);
 }
 
 function resolveDetailMode(
   detail: string,
   count: number,
-  threshold: { compactThreshold: number; filesOnlyThreshold: number },
+  threshold: { compactThreshold: number; filesOnlyThreshold: number; overviewThreshold?: number },
 ): string {
   if (detail !== "auto") return detail;
   if (count <= threshold.compactThreshold) return "full";
   if (count <= threshold.filesOnlyThreshold) return "compact";
-  return "files_only";
+  if (count <= (threshold.overviewThreshold ?? 200)) return "files_only";
+  return "overview";
 }
 
 function buildForMode(module: string, records: FunctionRecord[], mode: string) {
+  if (mode === "overview") return buildOverview(module, records);
   if (mode === "files_only") return buildFilesOnly(module, records);
   if (mode === "compact") return buildCompact(module, records);
   return buildFull(module, records);
 }
 
 // === Output builders ===
+
+function buildOverview(module: string, records: FunctionRecord[]): Record<string, unknown> {
+  const subGroups = groupBySubmodule(records);
+  const hasSubmodules = subGroups.size > 1 || !subGroups.has("(root)");
+
+  const submodules = Array.from(subGroups.entries())
+    .sort(([a], [b]) => a === "(root)" ? -1 : b === "(root)" ? 1 : a.localeCompare(b))
+    .map(([name, recs]) => {
+      const files = new Set(recs.map(r => r.filePath)).size;
+      let classes = 0, functions = 0, methods = 0;
+      for (const r of recs) {
+        if (r.kind === "class" || r.kind === "interface") classes++;
+        else if (r.kind === "method") methods++;
+        else functions++;
+      }
+      return { submodule: name, files, classes, functions, methods };
+    });
+
+  const exampleSub = submodules.find(s => s.submodule !== "(root)")?.submodule;
+  const hint = hasSubmodules
+    ? `Query specific submodules for details (e.g., module: '${module}/${exampleSub}')`
+    : "Use the file: parameter to explore specific files, or try a more specific module path.";
+
+  return {
+    module,
+    mode: "overview",
+    total: records.length,
+    submodules,
+    hint,
+  };
+}
+
+function applyBudgetGuard(
+  output: Record<string, unknown>,
+  budget: number,
+): Record<string, unknown> {
+  const serialized = JSON.stringify(output);
+  if (serialized.length <= budget) return output;
+
+  const arrayKey = output.submodules ? "submodules" : "files";
+  const arr = output[arrayKey] as unknown[] | undefined;
+  if (!arr?.length || arr.length <= 1) return output;
+
+  // Ratio-based estimation: how many items fit within budget
+  const arrSerialized = JSON.stringify(arr);
+  const overhead = serialized.length - arrSerialized.length;
+  const perItem = arrSerialized.length / arr.length;
+  const targetCount = Math.max(1, Math.floor((budget - overhead) / perItem * 0.9));
+  const kept = Math.min(targetCount, arr.length);
+
+  return {
+    ...output,
+    [arrayKey]: arr.slice(0, kept),
+    truncated: true,
+    truncated_count: arr.length - kept,
+    hint: output.hint || "Output truncated due to size. Use a more specific module path.",
+  };
+}
 
 function buildFilesOnly(module: string, records: FunctionRecord[]) {
   const fileMap = new Map<string, { classes: string[]; functions: number; methods: number }>();

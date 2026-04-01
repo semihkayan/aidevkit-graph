@@ -396,8 +396,8 @@ function buildModuleSummaryTests(ctx: AppContext, ds: DiscoveryState): TestCase[
   if (large) {
     cases.push(
       { tool: "get_module_summary", args: { module: large.m, workspace: ds.workspace },
-        label: `module: large(${large.total})→compact/files`,
-        assert: d => (d?.mode === "compact" || d?.mode === "files_only") || `expected compact/files_only, got ${d?.mode}` },
+        label: `module: large(${large.total})→compact/files/overview`,
+        assert: d => (d?.mode === "compact" || d?.mode === "files_only" || d?.mode === "overview" || d?.group_by === "submodule") || `expected compact/files_only/overview, got ${d?.mode}` },
       // files_only item structure
       { tool: "get_module_summary", args: { module: large.m, workspace: ds.workspace, detail: "files_only" },
         label: "module: files_only item fields",

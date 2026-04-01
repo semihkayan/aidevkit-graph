@@ -306,6 +306,7 @@ export interface Config {
   moduleSummary: {
     compactThreshold: number;
     filesOnlyThreshold: number;
+    overviewThreshold: number;
     maxTokenBudget: number;
   };
   search: {

@@ -17,7 +17,11 @@ export const ModuleSummarySchema = z.object({
   module: z.string().min(1).describe("Directory path relative to project root (e.g., 'payments', 'domain/order', 'src/components'). Returns all functions in this directory and subdirectories. Source root prefixes are automatically stripped. Dot notation is converted to path separators (e.g., 'com.example.service' → 'com/example/service')."),
   workspace,
   file: z.string().optional().describe("Focus on a single file within the module (e.g., 'checkout.py'). Omit to see the entire module."),
-  detail: z.enum(["auto", "full", "compact", "files_only"]).default("auto").describe("Detail level: 'auto' adapts to module size (default), 'full' shows signatures+summary+tags, 'compact' shows signatures only, 'files_only' shows file list with function counts."),
+  detail: z.enum(["auto", "full", "compact", "files_only", "overview"]).default("auto").describe(
+    "Detail level: 'auto' adapts to module size (default), 'full' shows signatures+summary+tags, " +
+    "'compact' shows signatures only, 'files_only' shows file list with function counts, " +
+    "'overview' shows only submodule-level statistics (file/class/function counts per subdirectory)."
+  ),
   group_by: z.enum(["auto", "file", "submodule"]).default("auto").describe(
     "Grouping strategy: 'auto' uses submodule grouping when module has sub-directories and is large enough (default), " +
     "'file' groups by source file only (classic behavior), 'submodule' groups by sub-directory within the module."
