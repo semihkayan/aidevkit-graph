@@ -42,27 +42,27 @@ async function main() {
   const ctx = services;
 
   server.registerTool("semantic_search", {
-    description: "Search the codebase by meaning. Works across all workspaces automatically in monorepos. Use as the FIRST STEP when looking for code related to a concept, feature, or bug — before grep or reading files. Finds functions even when you don't know exact names. Results include workspace, signature, body size, summary, and file location to help you decide what to open.",
+    description: "Search the codebase by meaning. Works across all workspaces automatically in monorepos.\n\nCRITICAL: Use this INSTEAD OF grep or rg when looking for code by concept, feature, or bug area. Unlike text search, this finds functions even when you don't know exact names, spellings, or which files to look in. Use as the FIRST STEP for any code exploration task. Results include workspace, signature, body size, summary, and file location to help you decide what to read next.",
     inputSchema: SemanticSearchSchema.shape,
   }, (args) => handleSemanticSearch(args as any, ctx));
 
   server.registerTool("get_module_summary", {
-    description: "List all functions and classes in a directory with their signatures. Use BEFORE reading files to understand what a module contains — saves tokens by showing metadata without source code. Auto-adapts detail level: full for small modules, compact for large ones.",
+    description: "List all functions and classes in a directory with their signatures.\n\nCRITICAL: Use this INSTEAD OF find, ls, tree, or Glob to explore what a module contains. File listings only give you names — this gives you function signatures, summaries, and structure. Saves tokens by showing metadata without source code. Auto-adapts detail level: full for small modules, compact for large ones.",
     inputSchema: ModuleSummarySchema.shape,
   }, (args) => handleModuleSummary(args as any, ctx));
 
   server.registerTool("get_function_source", {
-    description: "Get the source code of a specific function by name. Use INSTEAD OF reading entire files — returns only the function you need, saving tokens. Supports surrounding context lines.",
+    description: "Get the source code of a specific function by name.\n\nIMPORTANT: Use this INSTEAD OF Read or cat when you need a single function. Reading an entire file to extract one function wastes tokens and pollutes your context window. This returns only the function you need. Supports: plain name ('processOrder'), class.method ('PaymentProcessor.refund'), or partial match. Use context_lines parameter to include surrounding imports or related code.",
     inputSchema: FunctionSourceSchema.shape,
   }, (args) => handleFunctionSource(args as any, ctx));
 
   server.registerTool("get_dependencies", {
-    description: "Show what a function calls — its forward dependencies. Cross-validates AST analysis with @deps docstring annotations. Categorizes each dependency as confirmed (AST+docstring), AST-only, docstring-only, or unresolved.",
+    description: "Show what a function calls — its forward dependencies.\n\nIMPORTANT: Use this INSTEAD OF grep or rg to trace what a function calls. Grep gives you text matches that include false positives — this gives you the actual AST-verified call graph. Cross-validates with @deps docstring annotations. Categorizes each dependency as confirmed (AST+docstring), AST-only, docstring-only, or unresolved.",
     inputSchema: DependenciesSchema.shape,
   }, (args) => handleDependencies(args as any, ctx));
 
   server.registerTool("get_impact_analysis", {
-    description: "Assess the blast radius of changing a function. Use BEFORE refactoring or modifying signatures. Combines call graph + type graph to find all affected code. Returns risk levels: high (direct callers + signature change), medium (indirect), low (transitive).",
+    description: "Assess the blast radius of changing a function.\n\nIMPORTANT: Use this INSTEAD OF grep or rg to find callers of a function. Grep misses indirect callers, interface implementations, and type relationships — this gives you the complete impact chain with risk levels. Use BEFORE refactoring or modifying function signatures. Combines call graph + type graph. Returns risk levels: high (direct callers + signature change), medium (indirect), low (transitive).",
     inputSchema: ImpactAnalysisSchema.shape,
   }, (args) => handleImpactAnalysis(args as any, ctx));
 
@@ -77,7 +77,7 @@ async function main() {
   }, (args) => handleReindex(args as any, ctx));
 
   server.registerTool("get_index_status", {
-    description: "Check index health: how many files/functions are indexed, embedding status, call graph stats, docstring coverage, and language breakdown.",
+    description: "Check index health: how many files/functions are indexed, embedding status, call graph stats, docstring coverage, and language breakdown.\n\nCRITICAL: Call this FIRST at the start of a session to verify the index is ready and discover available workspaces. Once confirmed, prefer codeweave tools over generic alternatives:\n- Exploring a module → get_module_summary (not find/ls/Glob)\n- Reading one function → get_function_source (not Read/cat)\n- Searching by concept → semantic_search (not grep/rg)\n- Tracing calls → get_dependencies (not grep)\n- Change risk → get_impact_analysis (not grep for callers)",
     inputSchema: IndexStatusSchema.shape,
   }, (args) => handleIndexStatus(args as any, ctx));
 
