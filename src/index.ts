@@ -3,7 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import path from "node:path";
 import { writeFileSync, unlinkSync, mkdirSync } from "node:fs";
-import { createServices, initializeWorkspaces, backgroundEmbed } from "./services.js";
+import { createServices, initializeWorkspaces, backgroundEmbed, seedCacheFromMainRepo } from "./services.js";
 import { logger } from "./utils/logger.js";
 
 // Schemas
@@ -100,6 +100,9 @@ async function main() {
   // Prevent stdout write errors (client pipe closed) from becoming uncaught exceptions.
   // StdioServerTransport.send() writes to stdout — if the client dies, the write emits 'error'.
   process.stdout.on('error', () => { /* pipe closed by MCP client */ });
+
+  // In a worktree with no cache, seed from main repo for fast warm start
+  await seedCacheFromMainRepo(services.config.projectRoot);
 
   // Initialize workspaces BEFORE connect — agent never sees NOT_READY.
   let embedPlans: Awaited<ReturnType<typeof initializeWorkspaces>>;
