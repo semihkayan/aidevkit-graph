@@ -1,14 +1,7 @@
 import type { AppContext, WorkspaceServices, NoiseFilterMetadata, LanguageConventions } from "../types/interfaces.js";
 import type { FunctionRecord } from "../types/index.js";
-import { resolveFunctionAcrossWorkspaces, textResponse } from "./tool-utils.js";
-
-function isNoisyCall(target: string, noise: NoiseFilterMetadata): boolean {
-  if (noise.noiseTargets.has(target)) return true;
-  if (noise.noisePatterns.some(p => p.test(target))) return true;
-  const method = target.split(".").pop();
-  if (method && target.includes(".") && noise.builtinMethods.has(method)) return true;
-  return false;
-}
+import { resolveFunctionAcrossWorkspaces, textResponse, isNoisyCall } from "./tool-utils.js";
+import { isAccessor } from "./density-scorer.js";
 
 /**
  * Collapse fluent method chains into one entry per chain.
@@ -45,6 +38,30 @@ function deduplicateChains<T extends { target: string; line: number }>(calls: T[
   return result;
 }
 
+/**
+ * Check if an unresolved call target is likely an accessor by looking up
+ * all definitions of the method name in the index. If every definition is
+ * a trivial accessor (small body, 0-1 params, 0 calls), the call is noise.
+ */
+function isLikelyAccessorCall(
+  target: string,
+  ws: WorkspaceServices,
+  constructorNames: ReadonlySet<string>,
+  noise: NoiseFilterMetadata,
+): boolean {
+  const method = target.split(".").pop();
+  if (!method) return false;
+
+  const candidates = ws.index.findByName(method);
+  if (candidates.length === 0) return false;
+
+  const noiseCheck = (t: string) => isNoisyCall(t, noise);
+  return candidates.every(record => {
+    const callEntry = ws.callGraph.getEntry(record.id);
+    return isAccessor(record, callEntry, constructorNames, noiseCheck);
+  });
+}
+
 function matchesDep(target: string, dep: string): boolean {
   // Direct match
   if (target.includes(dep) || dep.includes(target)) return true;
@@ -55,7 +72,7 @@ function matchesDep(target: string, dep: string): boolean {
   return false;
 }
 
-function analyzeDependencies(ws: WorkspaceServices, record: FunctionRecord, noise: NoiseFilterMetadata) {
+function analyzeDependencies(ws: WorkspaceServices, record: FunctionRecord, noise: NoiseFilterMetadata, constructorNames: ReadonlySet<string>) {
   const entry = ws.callGraph.getEntry(record.id);
   const docDeps = record.docstring?.deps || [];
 
@@ -63,6 +80,7 @@ function analyzeDependencies(ws: WorkspaceServices, record: FunctionRecord, nois
   const astOnly: any[] = [];
   const unresolvedCalls: any[] = [];
   const docstringOnly: string[] = [];
+  let accessorsFiltered = 0;
 
   if (entry) {
     // Pre-filter noise and collapse fluent chains before categorization
@@ -110,6 +128,8 @@ function analyzeDependencies(ws: WorkspaceServices, record: FunctionRecord, nois
           const inDocDeps = docDeps.some(d => matchesDep(delegateTarget, d));
           if (inDocDeps) {
             confirmed.push({ target: delegateTarget, file: null, line: call.line, source: "confirmed" });
+          } else if (isLikelyAccessorCall(delegateTarget, ws, constructorNames, noise)) {
+            accessorsFiltered++;
           } else {
             astOnly.push({ target: delegateTarget, line: call.line, resolved: false, note: "Delegation via injected dependency" });
           }
@@ -119,7 +139,11 @@ function analyzeDependencies(ws: WorkspaceServices, record: FunctionRecord, nois
         // Check if this looks like a service delegation (obj.method pattern with 2+ segments)
         const parts = call.target.split(".");
         if (parts.length >= 2 && !isNoisyCall(call.target, noise)) {
-          astOnly.push({ target: call.target, line: call.line, resolved: false, note: "Unresolved delegation" });
+          if (isLikelyAccessorCall(call.target, ws, constructorNames, noise)) {
+            accessorsFiltered++;
+          } else {
+            astOnly.push({ target: call.target, line: call.line, resolved: false, note: "Unresolved delegation" });
+          }
         } else if (!isNoisyCall(call.target, noise)) {
           unresolvedCalls.push({
             target: call.target,
@@ -137,7 +161,7 @@ function analyzeDependencies(ws: WorkspaceServices, record: FunctionRecord, nois
     }
   }
 
-  return { confirmed, astOnly, unresolvedCalls, docstringOnly };
+  return { confirmed, astOnly, unresolvedCalls, docstringOnly, accessorsFiltered };
 }
 
 function analyzeClassDependencies(
@@ -153,20 +177,22 @@ function analyzeClassDependencies(
   const astOnly: any[] = [];
   const unresolvedCalls: any[] = [];
   const docstringOnly: string[] = [];
+  let accessorsFiltered = 0;
 
   for (const methodName of methods) {
     const methodId = `${record.filePath}::${record.name}.${methodName}`;
     const methodRecord = ws.index.getById(methodId);
     if (!methodRecord) continue;
 
-    const result = analyzeDependencies(ws, methodRecord, noise);
+    const result = analyzeDependencies(ws, methodRecord, noise, conventions.constructorNames);
     for (const e of result.confirmed) confirmed.push({ ...e, via: methodName });
     for (const e of result.astOnly) astOnly.push({ ...e, via: methodName });
     for (const e of result.unresolvedCalls) unresolvedCalls.push({ ...e, via: methodName });
     for (const e of result.docstringOnly) docstringOnly.push(e);
+    accessorsFiltered += result.accessorsFiltered;
   }
 
-  return { confirmed, astOnly, unresolvedCalls, docstringOnly, methods };
+  return { confirmed, astOnly, unresolvedCalls, docstringOnly, methods, accessorsFiltered };
 }
 
 export async function handleDependencies(
@@ -182,7 +208,7 @@ export async function handleDependencies(
     const { ws, wsPath, record } = resolved.matches[0];
 
     if (record.kind === "class") {
-      const { confirmed, astOnly, unresolvedCalls, docstringOnly, methods } =
+      const { confirmed, astOnly, unresolvedCalls, docstringOnly, methods, accessorsFiltered } =
         analyzeClassDependencies(ws, record, ctx.noiseFilter, ctx.conventions);
       return textResponse({
         function: record.name,
@@ -194,11 +220,13 @@ export async function handleDependencies(
         ...(astOnly.length > 0 ? { ast_only: astOnly } : {}),
         ...(docstringOnly.length > 0 ? { docstring_only: docstringOnly } : {}),
         ...(unresolvedCalls.length > 0 ? { unresolved: unresolvedCalls } : {}),
+        ...(accessorsFiltered > 0 ? { accessors_filtered: accessorsFiltered } : {}),
         caveat: "Static analysis only. Dynamic dispatch, callbacks, and inherited methods are not captured.",
       });
     }
 
-    const { confirmed, astOnly, unresolvedCalls, docstringOnly } = analyzeDependencies(ws, record, ctx.noiseFilter);
+    const { confirmed, astOnly, unresolvedCalls, docstringOnly, accessorsFiltered } =
+      analyzeDependencies(ws, record, ctx.noiseFilter, ctx.conventions.constructorNames);
 
     return textResponse({
       function: record.name,
@@ -208,6 +236,7 @@ export async function handleDependencies(
       ...(astOnly.length > 0 ? { ast_only: astOnly } : {}),
       ...(docstringOnly.length > 0 ? { docstring_only: docstringOnly } : {}),
       ...(unresolvedCalls.length > 0 ? { unresolved: unresolvedCalls } : {}),
+      ...(accessorsFiltered > 0 ? { accessors_filtered: accessorsFiltered } : {}),
       caveat: "Static analysis only. Dynamic dispatch, callbacks, and inherited methods are not captured.",
     });
   }
@@ -215,7 +244,7 @@ export async function handleDependencies(
   // Multiple matches across workspaces
   const results = resolved.matches.map(({ ws, wsPath, record }) => {
     if (record.kind === "class") {
-      const { confirmed, astOnly, unresolvedCalls, docstringOnly, methods } =
+      const { confirmed, astOnly, unresolvedCalls, docstringOnly, methods, accessorsFiltered } =
         analyzeClassDependencies(ws, record, ctx.noiseFilter, ctx.conventions);
       return {
         function: record.name,
@@ -227,9 +256,11 @@ export async function handleDependencies(
         ...(astOnly.length > 0 ? { ast_only: astOnly } : {}),
         ...(docstringOnly.length > 0 ? { docstring_only: docstringOnly } : {}),
         ...(unresolvedCalls.length > 0 ? { unresolved: unresolvedCalls } : {}),
+        ...(accessorsFiltered > 0 ? { accessors_filtered: accessorsFiltered } : {}),
       };
     }
-    const { confirmed, astOnly, unresolvedCalls, docstringOnly } = analyzeDependencies(ws, record, ctx.noiseFilter);
+    const { confirmed, astOnly, unresolvedCalls, docstringOnly, accessorsFiltered } =
+      analyzeDependencies(ws, record, ctx.noiseFilter, ctx.conventions.constructorNames);
     return {
       function: record.name,
       file: record.filePath,
@@ -238,6 +269,7 @@ export async function handleDependencies(
       ...(astOnly.length > 0 ? { ast_only: astOnly } : {}),
       ...(docstringOnly.length > 0 ? { docstring_only: docstringOnly } : {}),
       ...(unresolvedCalls.length > 0 ? { unresolved: unresolvedCalls } : {}),
+      ...(accessorsFiltered > 0 ? { accessors_filtered: accessorsFiltered } : {}),
     };
   });
 

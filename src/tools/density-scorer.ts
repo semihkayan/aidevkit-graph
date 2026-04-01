@@ -143,9 +143,17 @@ const NON_ACCESSOR_KINDS = new Set(["class", "interface", "enum", "struct", "rec
 /**
  * Detect getter/setter methods using parser hints + structural fallback:
  * 1. Parser-confirmed: propertyAccess hint + small body (≤3 lines)
- * 2. Heuristic fallback: body ≤ 4 lines, 0-1 params, 0 total calls
+ * 2. Heuristic fallback: body ≤ 4 lines, 0-1 params, 0 meaningful calls
+ *
+ * Optional isCallNoise predicate filters defensive wrappers (Objects.requireNonNull,
+ * Optional.ofNullable, unwrap, etc.) so they don't disqualify accessors.
  */
-export function isAccessor(record: FunctionRecord, callEntry: CallGraphEntry | undefined, constructorNames?: ReadonlySet<string>): boolean {
+export function isAccessor(
+  record: FunctionRecord,
+  callEntry: CallGraphEntry | undefined,
+  constructorNames?: ReadonlySet<string>,
+  isCallNoise?: (target: string) => boolean,
+): boolean {
   if (NON_ACCESSOR_KINDS.has(record.kind)) return false;
   if (isConstructor(record, constructorNames)) return false;
   if (record.structuralHints?.isAbstract) return false; // No body by design
@@ -164,10 +172,13 @@ export function isAccessor(record: FunctionRecord, callEntry: CallGraphEntry | u
   const paramCount = record.paramTypes?.length ?? countParamsFromSignature(record.signature);
   if (paramCount > 1) return false;
 
-  // Count ALL calls (resolved + unresolved), not just resolved.
-  // Unresolved calls like this.field.method() still indicate real behavior.
-  const totalCalls = callEntry?.calls.length ?? 0;
-  if (totalCalls > 0) return false;
+  // Count meaningful calls — noise calls (defensive wrappers, utility calls) don't
+  // indicate real behavior. Unresolved calls like this.field.method() still count.
+  const calls = callEntry?.calls ?? [];
+  const meaningfulCalls = isCallNoise
+    ? calls.filter(c => !isCallNoise(c.target)).length
+    : calls.length;
+  if (meaningfulCalls > 0) return false;
 
   return true;
 }
@@ -178,7 +189,7 @@ export function applyDensityAdjustment(
   results: Array<{ score: number; record: FunctionRecord | null; [key: string]: unknown }>,
   ws: WorkspaceServices,
   config: Config,
-  options?: { skipTestPenalty?: boolean; constructorNames?: ReadonlySet<string> },
+  options?: { skipTestPenalty?: boolean; constructorNames?: ReadonlySet<string>; isCallNoise?: (target: string) => boolean },
 ): void {
   const densityConfig = config.search.density;
   if (!densityConfig.enabled) return;
@@ -199,8 +210,8 @@ export function applyDensityAdjustment(
 
     // Orthogonal penalties for low-information-density categories
 
-    // Accessors: short body, few params, no project calls → pure data access, no behavior.
-    if (isAccessor(r.record, callEntry, options?.constructorNames)) {
+    // Accessors: short body, few params, no meaningful calls → pure data access, no behavior.
+    if (isAccessor(r.record, callEntry, options?.constructorNames, options?.isCallNoise)) {
       r.score *= accessorPenalty;
     }
 

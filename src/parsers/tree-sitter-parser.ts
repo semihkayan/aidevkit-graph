@@ -17,6 +17,7 @@ export interface TreeSitterLanguageConfig {
   extractImports(rootNode: SyntaxNode, filePath: string): RawImportInfo[];
   extractDocstring(node: SyntaxNode): string | null;
   extractTypeRelationships(rootNode: SyntaxNode, filePath: string): RawTypeRelationship[];
+  extractLocalVariables?(rootNode: SyntaxNode, lineStart: number, lineEnd: number): Array<{ name: string; type: string }>;
 
   // Language-specific metadata (optional — aggregated across all configs at startup)
   testDecorators?: string[];
@@ -82,6 +83,12 @@ export class TreeSitterParser implements ILanguageParser {
   parseTypeRelationships(source: string, filePath: string): RawTypeRelationship[] {
     const tree = this.parse(source);
     return this.config.extractTypeRelationships(tree.rootNode, filePath);
+  }
+
+  parseLocalVariables(source: string, lineStart: number, lineEnd: number): Array<{ name: string; type: string }> {
+    if (!this.config.extractLocalVariables) return [];
+    const tree = this.parse(source);
+    return this.config.extractLocalVariables(tree.rootNode, lineStart, lineEnd);
   }
 
   // Metadata getters — used by aggregation functions in registry.ts

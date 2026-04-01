@@ -1,6 +1,6 @@
 {
   "name": "@codeweave/mcp",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Codebase graph analysis for AI agents — AST + call graph + type graph + hybrid semantic search via MCP",
   "type": "module",
   "engines": {

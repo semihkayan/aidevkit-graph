@@ -1,4 +1,4 @@
-import type { AppContext, WorkspaceServices, LanguageConventions } from "../types/interfaces.js";
+import type { AppContext, WorkspaceServices, LanguageConventions, NoiseFilterMetadata } from "../types/interfaces.js";
 import type { FunctionRecord } from "../types/index.js";
 import { findSimilar } from "../utils/string-similarity.js";
 
@@ -116,6 +116,14 @@ export function resolveFunctionAcrossWorkspaces(
 
 export function textResponse(data: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+export function isNoisyCall(target: string, noise: NoiseFilterMetadata): boolean {
+  if (noise.noiseTargets.has(target)) return true;
+  if (noise.noisePatterns.some(p => p.test(target))) return true;
+  const method = target.split(".").pop();
+  if (method && target.includes(".") && noise.builtinMethods.has(method)) return true;
+  return false;
 }
 
 /**

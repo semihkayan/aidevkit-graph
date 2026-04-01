@@ -1,6 +1,6 @@
 import type { AppContext, WorkspaceServices, LanguageConventions } from "../types/interfaces.js";
 import type { FunctionRecord } from "../types/index.js";
-import { resolveWorkspaces, textResponse } from "./tool-utils.js";
+import { resolveWorkspaces, textResponse, isNoisyCall } from "./tool-utils.js";
 import { applyDensityAdjustment, countParamsFromSignature } from "./density-scorer.js";
 
 const MIN_SCORE = 0.4;
@@ -185,6 +185,7 @@ async function searchSingleWorkspace(
   applyDensityAdjustment(enriched, ws, ctx.config, {
     skipTestPenalty: queryTargetsTests(query),
     constructorNames: ctx.conventions.constructorNames,
+    isCallNoise: (target: string) => isNoisyCall(target, ctx.noiseFilter),
   });
 
   return { results: enriched, desyncCount };
