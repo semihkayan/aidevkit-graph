@@ -76,6 +76,59 @@ type EnrichedResult = {
 };
 
 /**
+ * Merge results from multiple workspaces with balanced representation.
+ * Guarantees each workspace minimum slots to prevent one workspace from dominating
+ * when its vocabulary aligns better with the query (e.g., explicit "OAuth" in Java
+ * vs implicit "useAuthStore" in mobile). Single-workspace searches skip balancing.
+ */
+function mergeWithWorkspaceBalance(
+  allResults: EnrichedResult[],
+  topK: number,
+): EnrichedResult[] {
+  const eligible = allResults.filter(r => r.score >= MIN_SCORE);
+  eligible.sort((a, b) => b.score - a.score);
+
+  // Group by workspace
+  const byWorkspace = new Map<string, EnrichedResult[]>();
+  for (const r of eligible) {
+    const ws = r.workspace ?? "";
+    let group = byWorkspace.get(ws);
+    if (!group) { group = []; byWorkspace.set(ws, group); }
+    group.push(r);
+  }
+
+  // Single workspace with results — no balancing needed
+  if (byWorkspace.size <= 1) {
+    return eligible.slice(0, topK);
+  }
+
+  // Minimum per workspace: ~half of equal share, capped to prevent over-allocation
+  const wsCount = byWorkspace.size;
+  const rawMin = Math.ceil(topK / wsCount / 2);
+  const minPerWs = Math.max(1, Math.min(rawMin, Math.floor(topK / wsCount)));
+
+  // Phase 1: Guaranteed slots — each group is already sorted (subset of sorted eligible)
+  const placed = new Set<EnrichedResult>();
+  for (const group of byWorkspace.values()) {
+    const take = Math.min(minPerWs, group.length);
+    for (let i = 0; i < take; i++) placed.add(group[i]);
+  }
+
+  // Phase 2: Fill remaining slots from global ranking (eligible is already sorted)
+  const slotsLeft = topK - placed.size;
+  let filled = 0;
+  for (const r of eligible) {
+    if (filled >= slotsLeft) break;
+    if (!placed.has(r)) { placed.add(r); filled++; }
+  }
+
+  // Re-sort for display ordering
+  const merged = Array.from(placed);
+  merged.sort((a, b) => b.score - a.score);
+  return merged;
+}
+
+/**
  * Search a single workspace and return enriched, density-adjusted results.
  */
 async function searchSingleWorkspace(
@@ -177,9 +230,8 @@ export async function handleSemanticSearch(
     totalVectors += await ws.vectorDb.countRows();
   }
 
-  // Re-sort by adjusted score across all workspaces, filter and cut
-  allResults.sort((a, b) => b.score - a.score);
-  const finalResults = allResults.filter(r => r.score >= MIN_SCORE).slice(0, topK);
+  // Merge results with workspace balance (prevents one workspace from dominating)
+  const finalResults = mergeWithWorkspaceBalance(allResults, topK);
 
   // Clean up: remove internal record reference, round scores, handle workspace field
   const showWorkspace = ctx.isMultiWorkspace;
