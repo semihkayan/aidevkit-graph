@@ -93,9 +93,11 @@ export class CallGraphManager implements ICallGraphReader, ICallGraphWriter {
   getTransitive(
     startId: string,
     direction: "downstream" | "upstream",
-    maxDepth: number
+    maxDepth: number,
+    bridgeNode?: (id: string) => string[]
   ): { nodes: Array<{ id: string; depth: number }>; cycles: string[][] } {
     const visited = new Set<string>();
+    const bridged = new Set<string>();
     const result: Array<{ id: string; depth: number }> = [];
     const cycles: string[][] = [];
     const parentMap = new Map<string, string | null>();
@@ -118,6 +120,7 @@ export class CallGraphManager implements ICallGraphReader, ICallGraphWriter {
         cycles.push(cyclePath);
         continue;
       }
+      if (bridged.has(id)) continue;
       visited.add(id);
       if (depth > 0) result.push({ id, depth });
 
@@ -127,6 +130,19 @@ export class CallGraphManager implements ICallGraphReader, ICallGraphWriter {
       const neighbors = direction === "downstream"
         ? entry.calls.filter(c => c.resolvedId).map(c => c.resolvedId!)
         : entry.calledBy.map(c => c.caller);
+
+      if (bridgeNode) {
+        for (const bridgeId of bridgeNode(id)) {
+          if (visited.has(bridgeId) || bridged.has(bridgeId)) continue;
+          bridged.add(bridgeId);
+          const bridgeEntry = this.graph.get(bridgeId);
+          if (!bridgeEntry) continue;
+          const extra = direction === "downstream"
+            ? bridgeEntry.calls.filter(c => c.resolvedId).map(c => c.resolvedId!)
+            : bridgeEntry.calledBy.map(c => c.caller);
+          neighbors.push(...extra);
+        }
+      }
 
       for (const neighborId of neighbors) {
         if (!parentMap.has(neighborId)) parentMap.set(neighborId, id);
@@ -258,6 +274,16 @@ export class CallGraphManager implements ICallGraphReader, ICallGraphWriter {
               const sameFileRecords = index.getByFile(callerRecord.filePath);
               const match = sameFileRecords.find(r =>
                 r.name === methodName || r.name.endsWith(`.${methodName}`)
+              );
+              if (match) call.resolvedId = match.id;
+            }
+          } else if (parts.length === 1) {
+            // Bare method name — same-file call without self keyword prefix
+            const callerRecord = index.getById(callerId);
+            if (callerRecord) {
+              const sameFileRecords = index.getByFile(callerRecord.filePath);
+              const match = sameFileRecords.find(r =>
+                r.name === call.target || r.name.endsWith(`.${call.target}`)
               );
               if (match) call.resolvedId = match.id;
             }

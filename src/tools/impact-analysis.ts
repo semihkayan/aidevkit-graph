@@ -3,7 +3,7 @@ import type { FunctionRecord } from "../types/index.js";
 import { resolveFunctionAcrossWorkspaces, textResponse } from "./tool-utils.js";
 
 type Risk = "high" | "medium" | "low";
-type TypeImpactRelationship = "implementors" | "extenders" | "usedBy" | "implementor_callers" | "interface_contract";
+type TypeImpactRelationship = "implementors" | "extenders" | "usedBy" | "implementor_callers" | "interface_contract" | "implementor_methods";
 
 interface TypeImpactEntry {
   type: string;
@@ -14,23 +14,80 @@ interface TypeImpactEntry {
   via?: string;
 }
 
+/**
+ * Find equivalent method IDs across interface↔implementation and class↔subclass boundaries.
+ * Used for bridging BFS traversal across type hierarchy boundaries.
+ */
+function getMethodEquivalents(ws: WorkspaceServices, methodId: string): string[] {
+  const record = ws.index.getById(methodId);
+  if (!record || record.kind !== "method") return [];
+
+  const dotIdx = record.name.indexOf(".");
+  if (dotIdx <= 0) return [];
+  const parentName = record.name.substring(0, dotIdx);
+  const methodName = record.name.substring(dotIdx + 1);
+
+  const parentRecord = ws.index.findByExactName(parentName)
+    .find(r => r.kind === "class" || r.kind === "interface");
+  if (!parentRecord) return [];
+
+  const relatedTypeIds: string[] = [];
+
+  if (parentRecord.typeRelationships) {
+    for (const ifaceName of parentRecord.typeRelationships.implements ?? []) {
+      const ifaceRecord = ws.index.findByExactName(ifaceName).find(r => r.kind === "interface");
+      if (ifaceRecord) relatedTypeIds.push(ifaceRecord.id);
+      relatedTypeIds.push(...ws.typeGraph.getImplementors(ifaceName).filter(id => id !== parentRecord.id));
+    }
+    for (const baseName of parentRecord.typeRelationships.extends ?? []) {
+      const baseRecord = ws.index.findByExactName(baseName).find(r => r.kind === "class" || r.kind === "interface");
+      if (baseRecord) relatedTypeIds.push(baseRecord.id);
+      const siblings = ws.typeGraph.getTypeNode(baseName)?.kind === "interface"
+        ? ws.typeGraph.getImplementors(baseName)
+        : ws.typeGraph.getExtenders(baseName);
+      if (siblings) relatedTypeIds.push(...siblings.filter(id => id !== parentRecord.id));
+    }
+  }
+
+  relatedTypeIds.push(...ws.typeGraph.getImplementors(parentName));
+  relatedTypeIds.push(...ws.typeGraph.getExtenders(parentName));
+
+  const equivalents: string[] = [];
+  const seen = new Set<string>();
+  for (const typeId of relatedTypeIds) {
+    const sep = typeId.indexOf("::");
+    if (sep === -1) continue;
+    const filePath = typeId.slice(0, sep);
+    const typeName = typeId.slice(sep + 2);
+    const candidateId = `${filePath}::${typeName}.${methodName}`;
+    if (!seen.has(candidateId) && candidateId !== methodId && ws.index.getById(candidateId)) {
+      seen.add(candidateId);
+      equivalents.push(candidateId);
+    }
+  }
+  return equivalents;
+}
+
 function analyzeImpact(
   ws: WorkspaceServices,
   record: FunctionRecord,
   changeType: "signature" | "behavior" | "removal",
   conventions?: LanguageConventions,
 ) {
-  // Build call-line map for depth-1 callers (where each caller invokes the target)
-  const directEntry = ws.callGraph.getEntry(record.id);
+  // Build call-line map for depth-1 callers, including equivalents (interface↔implementation)
   const callLineMap = new Map<string, number>();
-  if (directEntry) {
-    for (const c of directEntry.calledBy) {
-      callLineMap.set(c.caller, c.line);
+  for (const targetId of [record.id, ...getMethodEquivalents(ws, record.id)]) {
+    const entry = ws.callGraph.getEntry(targetId);
+    if (entry) {
+      for (const c of entry.calledBy) {
+        if (!callLineMap.has(c.caller)) callLineMap.set(c.caller, c.line);
+      }
     }
   }
 
-  // Call graph impact
-  const upstream = ws.callGraph.getTransitive(record.id, "upstream", 5);
+  // Call graph impact (with interface↔implementation bridging)
+  const bridgeFn = (id: string) => getMethodEquivalents(ws, id);
+  const upstream = ws.callGraph.getTransitive(record.id, "upstream", 5, bridgeFn);
   const callImpact = upstream.nodes.map(n => {
     const r = ws.index.getById(n.id);
     let risk: Risk;
@@ -93,6 +150,7 @@ function analyzeImpact(
     }
   } else if (record.kind === "method") {
     typeImpact.push(...collectInterfaceContract(ws, record, changeType));
+    typeImpact.push(...collectInterfaceMethodImplementors(ws, record, changeType, conventions));
   }
 
   return { callImpact, typeImpact };
@@ -179,6 +237,62 @@ function collectInterfaceContract(
       });
     }
   }
+  return entries;
+}
+
+/**
+ * When a method on an INTERFACE changes, find all implementing class methods.
+ * Reports which concrete implementations must be updated and who calls them.
+ */
+function collectInterfaceMethodImplementors(
+  ws: WorkspaceServices,
+  record: FunctionRecord,
+  changeType: "signature" | "behavior" | "removal",
+  conventions?: LanguageConventions,
+): TypeImpactEntry[] {
+  const dotIdx = record.name.indexOf(".");
+  if (dotIdx <= 0) return [];
+
+  const parentName = record.name.substring(0, dotIdx);
+  const methodName = record.name.substring(dotIdx + 1);
+
+  const parentRecord = ws.index.findByExactName(parentName).find(r => r.kind === "interface");
+  if (!parentRecord) return [];
+
+  const implementorIds = ws.typeGraph.getImplementors(parentName);
+  if (implementorIds.length === 0) return [];
+
+  const entries: TypeImpactEntry[] = [];
+  const implMethodRecords: Array<{ function: string; file: string; line_start: number }> = [];
+  const implClassIds: string[] = [];
+
+  for (const implId of implementorIds) {
+    const sep = implId.indexOf("::");
+    if (sep === -1) continue;
+    const filePath = implId.slice(0, sep);
+    const implClassName = implId.slice(sep + 2);
+    const implMethodId = `${filePath}::${implClassName}.${methodName}`;
+    const methodRecord = ws.index.getById(implMethodId);
+    if (methodRecord) {
+      implMethodRecords.push({
+        function: methodRecord.name,
+        file: methodRecord.filePath,
+        line_start: methodRecord.lineStart,
+      });
+      implClassIds.push(implId);
+    }
+  }
+
+  if (implMethodRecords.length > 0) {
+    entries.push({
+      type: parentName,
+      relationship: "implementor_methods",
+      affected: implMethodRecords,
+      risk: changeType === "signature" || changeType === "removal" ? "high" : "medium",
+    });
+    entries.push(...collectImplementorCallers(ws, parentName, implClassIds, changeType, conventions));
+  }
+
   return entries;
 }
 

@@ -104,7 +104,8 @@ export interface ICallGraphReader {
   getTransitive(
     startId: string,
     direction: "downstream" | "upstream",
-    maxDepth: number
+    maxDepth: number,
+    bridgeNode?: (id: string) => string[]
   ): { nodes: Array<{ id: string; depth: number }>; cycles: string[][] };
   getStats(): { nodes: number; edges: number; cycles: number };
 }
