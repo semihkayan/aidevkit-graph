@@ -76,8 +76,9 @@ type EnrichedResult = {
   line_start: number;
   line_end: number;
   workspace?: string;
-  record: FunctionRecord; // Temporarily attached for density adjustments
 };
+
+type ScoredResult = EnrichedResult & { record: FunctionRecord };
 
 /**
  * Merge results from multiple workspaces with balanced representation.
@@ -85,15 +86,15 @@ type EnrichedResult = {
  * when its vocabulary aligns better with the query (e.g., explicit "OAuth" in Java
  * vs implicit "useAuthStore" in mobile). Single-workspace searches skip balancing.
  */
-function mergeWithWorkspaceBalance(
-  allResults: EnrichedResult[],
+function mergeWithWorkspaceBalance<T extends EnrichedResult>(
+  allResults: T[],
   topK: number,
-): EnrichedResult[] {
+): T[] {
   const eligible = allResults.filter(r => r.score >= MIN_SCORE);
   eligible.sort((a, b) => b.score - a.score);
 
   // Group by workspace
-  const byWorkspace = new Map<string, EnrichedResult[]>();
+  const byWorkspace = new Map<string, T[]>();
   for (const r of eligible) {
     const ws = r.workspace ?? "";
     let group = byWorkspace.get(ws);
@@ -112,7 +113,7 @@ function mergeWithWorkspaceBalance(
   const minPerWs = Math.max(1, Math.min(rawMin, Math.floor(topK / wsCount)));
 
   // Phase 1: Guaranteed slots — each group is already sorted (subset of sorted eligible)
-  const placed = new Set<EnrichedResult>();
+  const placed = new Set<T>();
   for (const group of byWorkspace.values()) {
     const take = Math.min(minPerWs, group.length);
     for (let i = 0; i < take; i++) placed.add(group[i]);
@@ -142,7 +143,7 @@ async function searchSingleWorkspace(
   topK: number,
   options: { scope?: string; tags_filter?: string[]; side_effects_filter?: string[] },
   ctx: AppContext,
-): Promise<{ results: EnrichedResult[]; desyncCount: number }> {
+): Promise<{ results: ScoredResult[]; desyncCount: number }> {
   // Over-fetch for density adjustment: constructors/accessors/tests get eliminated,
   // so we need a larger pool. Pipeline internally also over-fetches *2 for RRF merge.
   const rawResults = await ws.search.search(
@@ -159,7 +160,7 @@ async function searchSingleWorkspace(
 
   // Enrich ALL candidates — density adjustment needs the full pool to rerank properly.
   let desyncCount = 0;
-  const enriched: EnrichedResult[] = candidates
+  const enriched: ScoredResult[] = candidates
     .map(r => {
       const record = ws.index.getById(r.id);
       if (!record) { desyncCount++; return null; }
@@ -224,7 +225,7 @@ export async function handleSemanticSearch(
     })
   );
 
-  const allResults: EnrichedResult[] = [];
+  const allResults: ScoredResult[] = [];
   let totalDesync = 0, totalIndexed = 0, totalVectors = 0;
   for (const { results, desyncCount, indexed, vectorCount } of outcomes) {
     allResults.push(...results);
@@ -236,11 +237,11 @@ export async function handleSemanticSearch(
   // Merge results with workspace balance (prevents one workspace from dominating)
   const finalResults = mergeWithWorkspaceBalance(allResults, topK);
 
-  // Clean up: remove internal record reference, round scores, assign confidence, handle workspace field
+  // Strip internal record reference, round scores, assign confidence
   const showWorkspace = ctx.isMultiWorkspace;
   const highThreshold = ctx.config.search.highConfidenceThreshold;
-  for (const r of finalResults) {
-    delete (r as any).record;
+  const outputResults = finalResults.map(({ record, ...rest }) => rest);
+  for (const r of outputResults) {
     r.score = Math.round(r.score * 1000) / 1000;
     r.confidence = r.score >= highThreshold ? "high" : "partial";
     if (!showWorkspace) delete r.workspace;
@@ -254,7 +255,7 @@ export async function handleSemanticSearch(
   else searchMode = "degraded";
 
   const response: Record<string, unknown> = {
-    results: finalResults,
+    results: outputResults,
     total_indexed: totalIndexed,
     search_mode: searchMode,
   };
