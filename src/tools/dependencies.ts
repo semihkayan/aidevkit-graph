@@ -1,4 +1,4 @@
-import type { AppContext, WorkspaceServices, NoiseFilterMetadata } from "../types/interfaces.js";
+import type { AppContext, WorkspaceServices, NoiseFilterMetadata, LanguageConventions } from "../types/interfaces.js";
 import type { FunctionRecord } from "../types/index.js";
 import { resolveFunctionAcrossWorkspaces, textResponse } from "./tool-utils.js";
 
@@ -140,6 +140,35 @@ function analyzeDependencies(ws: WorkspaceServices, record: FunctionRecord, nois
   return { confirmed, astOnly, unresolvedCalls, docstringOnly };
 }
 
+function analyzeClassDependencies(
+  ws: WorkspaceServices,
+  record: FunctionRecord,
+  noise: NoiseFilterMetadata,
+  conventions: LanguageConventions,
+) {
+  const methods = (record.classInfo?.methods ?? [])
+    .filter(m => !conventions.constructorNames.has(m));
+
+  const confirmed: any[] = [];
+  const astOnly: any[] = [];
+  const unresolvedCalls: any[] = [];
+  const docstringOnly: string[] = [];
+
+  for (const methodName of methods) {
+    const methodId = `${record.filePath}::${record.name}.${methodName}`;
+    const methodRecord = ws.index.getById(methodId);
+    if (!methodRecord) continue;
+
+    const result = analyzeDependencies(ws, methodRecord, noise);
+    for (const e of result.confirmed) confirmed.push({ ...e, via: methodName });
+    for (const e of result.astOnly) astOnly.push({ ...e, via: methodName });
+    for (const e of result.unresolvedCalls) unresolvedCalls.push({ ...e, via: methodName });
+    for (const e of result.docstringOnly) docstringOnly.push(e);
+  }
+
+  return { confirmed, astOnly, unresolvedCalls, docstringOnly, methods };
+}
+
 export async function handleDependencies(
   args: { function: string; workspace?: string; module?: string },
   ctx: AppContext
@@ -151,6 +180,24 @@ export async function handleDependencies(
 
   if (resolved.matches.length === 1) {
     const { ws, wsPath, record } = resolved.matches[0];
+
+    if (record.kind === "class") {
+      const { confirmed, astOnly, unresolvedCalls, docstringOnly, methods } =
+        analyzeClassDependencies(ws, record, ctx.noiseFilter, ctx.conventions);
+      return textResponse({
+        function: record.name,
+        file: record.filePath,
+        ...(showWorkspace ? { workspace: wsPath } : {}),
+        kind: "class",
+        methods_analyzed: methods,
+        calls: confirmed,
+        ...(astOnly.length > 0 ? { ast_only: astOnly } : {}),
+        ...(docstringOnly.length > 0 ? { docstring_only: docstringOnly } : {}),
+        ...(unresolvedCalls.length > 0 ? { unresolved: unresolvedCalls } : {}),
+        caveat: "Static analysis only. Dynamic dispatch, callbacks, and inherited methods are not captured.",
+      });
+    }
+
     const { confirmed, astOnly, unresolvedCalls, docstringOnly } = analyzeDependencies(ws, record, ctx.noiseFilter);
 
     return textResponse({
@@ -167,6 +214,21 @@ export async function handleDependencies(
 
   // Multiple matches across workspaces
   const results = resolved.matches.map(({ ws, wsPath, record }) => {
+    if (record.kind === "class") {
+      const { confirmed, astOnly, unresolvedCalls, docstringOnly, methods } =
+        analyzeClassDependencies(ws, record, ctx.noiseFilter, ctx.conventions);
+      return {
+        function: record.name,
+        file: record.filePath,
+        workspace: wsPath,
+        kind: "class" as const,
+        methods_analyzed: methods,
+        calls: confirmed,
+        ...(astOnly.length > 0 ? { ast_only: astOnly } : {}),
+        ...(docstringOnly.length > 0 ? { docstring_only: docstringOnly } : {}),
+        ...(unresolvedCalls.length > 0 ? { unresolved: unresolvedCalls } : {}),
+      };
+    }
     const { confirmed, astOnly, unresolvedCalls, docstringOnly } = analyzeDependencies(ws, record, ctx.noiseFilter);
     return {
       function: record.name,
