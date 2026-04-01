@@ -3,3 +3,4 @@ dist/
 .code-context/
 *.log
 .DS_Store
+feedback.md
