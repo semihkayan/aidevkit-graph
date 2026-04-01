@@ -42,6 +42,41 @@ function getAnnotations(node: SyntaxNode): string[] | undefined {
   return undefined;
 }
 
+const JAVA_PRIMITIVE_TYPES = new Set([
+  "int", "long", "double", "float", "boolean", "byte", "char", "short", "void",
+  "String", "Integer", "Long", "Double", "Float", "Boolean", "Byte", "Character", "Short",
+  "Object", "Void", "Number",
+]);
+
+function extractPrimaryTypeName(typeNode: SyntaxNode): string {
+  if (typeNode.type === "type_identifier") return typeNode.text;
+  if (typeNode.type === "generic_type") {
+    const primary = typeNode.children.find((c: SyntaxNode) => c.type === "type_identifier");
+    if (primary) return primary.text;
+  }
+  if (typeNode.type === "array_type") {
+    const element = typeNode.childForFieldName("element") || typeNode.children[0];
+    if (element) return extractPrimaryTypeName(element);
+  }
+  return typeNode.text;
+}
+
+function extractParamTypes(node: SyntaxNode): Array<{ name: string; type: string }> | undefined {
+  const params = node.childForFieldName("parameters");
+  if (!params) return undefined;
+  const result: Array<{ name: string; type: string }> = [];
+  for (let i = 0; i < params.childCount; i++) {
+    const param = params.children[i];
+    if (param.type !== "formal_parameter" && param.type !== "spread_parameter") continue;
+    const typeNode = param.childForFieldName("type");
+    const nameNode = param.childForFieldName("name");
+    if (typeNode && nameNode) {
+      result.push({ name: nameNode.text, type: extractPrimaryTypeName(typeNode) });
+    }
+  }
+  return result.length > 0 ? result : undefined;
+}
+
 function getVisibility(node: SyntaxNode): "public" | "private" | "protected" {
   for (let i = 0; i < node.childCount; i++) {
     const c = node.children[i];
@@ -83,6 +118,7 @@ function extractFunctions(rootNode: SyntaxNode, _filePath: string): RawFunctionI
       isAsync: false,
       docstring: getJavadoc(node) || undefined,
       decorators: getAnnotations(node),
+      paramTypes: extractParamTypes(node),
       structuralHints: isAbstract ? { isAbstract: true } : undefined,
     });
   }
@@ -102,6 +138,7 @@ function extractFunctions(rootNode: SyntaxNode, _filePath: string): RawFunctionI
       isAsync: false,
       docstring: getJavadoc(node) || undefined,
       decorators: getAnnotations(node),
+      paramTypes: extractParamTypes(node),
       structuralHints: { isConstructor: true },
     });
   }
@@ -198,16 +235,91 @@ function extractTypeRelationships(rootNode: SyntaxNode, filePath: string): RawTy
     const interfaces = node.childForFieldName("interfaces");
     const ext: string[] = superclass ? walkNodes(superclass, ["type_identifier"]).map((t: SyntaxNode) => t.text) : [];
     const impl: string[] = interfaces ? walkNodes(interfaces, ["type_identifier"]).map((t: SyntaxNode) => t.text) : [];
+
+    // Extract field types as class members + collect all referenced types
+    const members: Array<{ name: string; type: string }> = [];
+    const usesTypesSet = new Set<string>();
+    const body = node.childForFieldName("body");
+    if (body) {
+      for (let i = 0; i < body.childCount; i++) {
+        const child = body.children[i];
+        if (child.type !== "field_declaration") continue;
+        // Skip static fields — not instance dispatch targets
+        const mods = child.children.find((c: SyntaxNode) => c.type === "modifiers");
+        if (mods?.children?.some((c: SyntaxNode) => c.text === "static")) continue;
+
+        const typeNode = child.childForFieldName("type");
+        if (!typeNode) continue;
+        const typeName = extractPrimaryTypeName(typeNode);
+
+        // Collect field names (handles multi-declaration: int x, y;)
+        for (const decl of walkNodes(child, ["variable_declarator"])) {
+          const fieldName = decl.childForFieldName("name")?.text;
+          if (fieldName) members.push({ name: fieldName, type: typeName });
+        }
+
+        // Track all type identifiers including generic args (e.g., List<UserRepository> → both List and UserRepository)
+        for (const tid of walkNodes(typeNode, ["type_identifier"])) {
+          if (!JAVA_PRIMITIVE_TYPES.has(tid.text)) usesTypesSet.add(tid.text);
+        }
+      }
+
+      // Also collect types from method/constructor signatures
+      for (let i = 0; i < body.childCount; i++) {
+        const child = body.children[i];
+        if (child.type !== "method_declaration" && child.type !== "constructor_declaration") continue;
+        // Return type (methods only)
+        const retType = child.childForFieldName("type");
+        if (retType) {
+          for (const tid of walkNodes(retType, ["type_identifier"])) {
+            if (!JAVA_PRIMITIVE_TYPES.has(tid.text)) usesTypesSet.add(tid.text);
+          }
+        }
+        // Parameter types
+        const params = child.childForFieldName("parameters");
+        if (params) {
+          for (const tid of walkNodes(params, ["type_identifier"])) {
+            if (!JAVA_PRIMITIVE_TYPES.has(tid.text)) usesTypesSet.add(tid.text);
+          }
+        }
+      }
+    }
+    const usesTypes = Array.from(usesTypesSet);
+
     results.push({
-      className: name, kind: "class", implements: impl, extends: ext, usesTypes: [],
+      className: name, kind: "class", implements: impl, extends: ext, usesTypes,
+      members: members.length > 0 ? members : undefined,
       filePath, lineStart: node.startPosition.row + 1, lineEnd: node.endPosition.row + 1,
     });
   }
   for (const node of walkNodes(rootNode, ["interface_declaration"])) {
     const name = node.childForFieldName("name")?.text;
     if (!name) continue;
+
+    // Extract interface extends
+    const extendsNode = node.children.find((c: SyntaxNode) => c.type === "extends_interfaces");
+    const ext: string[] = extendsNode
+      ? walkNodes(extendsNode, ["type_identifier"]).map((t: SyntaxNode) => t.text)
+      : [];
+
+    // Extract interface method signatures as members (method name → return type)
+    const members: Array<{ name: string; type: string }> = [];
+    const ifaceBody = node.childForFieldName("body");
+    if (ifaceBody) {
+      for (let i = 0; i < ifaceBody.childCount; i++) {
+        const child = ifaceBody.children[i];
+        if (child.type !== "method_declaration") continue;
+        const methodName = child.childForFieldName("name")?.text;
+        const retType = child.childForFieldName("type");
+        if (methodName && retType) {
+          members.push({ name: methodName, type: extractPrimaryTypeName(retType) });
+        }
+      }
+    }
+
     results.push({
-      className: name, kind: "interface", implements: [], extends: [], usesTypes: [],
+      className: name, kind: "interface", implements: [], extends: ext, usesTypes: [],
+      members: members.length > 0 ? members : undefined,
       filePath, lineStart: node.startPosition.row + 1, lineEnd: node.endPosition.row + 1,
     });
   }

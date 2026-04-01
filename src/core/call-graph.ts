@@ -248,17 +248,22 @@ export class CallGraphManager implements ICallGraphReader, ICallGraphWriter {
             r.name === targetName || r.name.endsWith(`.${targetName}`)
           );
           if (match) call.resolvedId = match.id;
-        } else if (this.selfKeywords.has(call.target.split(".")[0])) {
-          // self.method() or this.method() — find in same file only
-          const methodName = call.target.split(".").pop()!;
-          const callerRecord = index.getById(callerId);
-          if (callerRecord) {
-            const sameFileRecords = index.getByFile(callerRecord.filePath);
-            const match = sameFileRecords.find(r =>
-              r.name === methodName || r.name.endsWith(`.${methodName}`)
-            );
-            if (match) call.resolvedId = match.id;
+        } else {
+          const parts = call.target.split(".");
+          if (this.selfKeywords.has(parts[0]) && parts.length === 2) {
+            // this.method() — same-class method, search same file
+            const methodName = parts[1];
+            const callerRecord = index.getById(callerId);
+            if (callerRecord) {
+              const sameFileRecords = index.getByFile(callerRecord.filePath);
+              const match = sameFileRecords.find(r =>
+                r.name === methodName || r.name.endsWith(`.${methodName}`)
+              );
+              if (match) call.resolvedId = match.id;
+            }
           }
+          // 3+ parts (this.field.method()) — skip same-file search,
+          // let type-aware resolution handle it via resolveViaTypeGraph() below
         }
 
         // Type-aware resolution for still-unresolved calls
@@ -272,8 +277,9 @@ export class CallGraphManager implements ICallGraphReader, ICallGraphWriter {
 
   /**
    * Resolve interface-based calls using the type graph.
-   * Pattern 1: this.field.method() — constructor injection
-   * Pattern 2: param.field.method() — function parameter injection
+   * Pattern 1: this.field.method() — explicit self-reference (e.g., this.repo.save())
+   * Pattern 2: param.method() — function parameter injection (e.g., repo.save() where repo is a param)
+   * Pattern 3: field.method() — implicit this (e.g., Java's repo.save() where repo is a class field)
    */
   private resolveViaTypeGraph(
     target: string,
@@ -295,11 +301,21 @@ export class CallGraphManager implements ICallGraphReader, ICallGraphWriter {
       return this.resolveTypeChain(className, parts.slice(1), index);
     }
 
-    // Pattern 2: param.field.method() — resolve via function parameter types
+    // Pattern 2: param.method() — resolve via function parameter types
     if (callerRecord.paramTypes && parts.length >= 2) {
       const paramType = callerRecord.paramTypes.find(p => p.name === parts[0]);
       if (paramType) {
         return this.resolveTypeChain(paramType.type, parts.slice(1), index);
+      }
+    }
+
+    // Pattern 3: field.method() — implicit this (Java/C# convention where this. is optional)
+    // Check if the first part matches a known class member of the caller's class
+    if (parts.length >= 2) {
+      const className = callerRecord.name.split(".")[0];
+      const memberType = this.typeGraph.getMemberType(className, parts[0]);
+      if (memberType) {
+        return this.resolveTypeChain(memberType, parts.slice(1), index);
       }
     }
 
