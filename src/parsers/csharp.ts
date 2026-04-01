@@ -344,10 +344,41 @@ function extractTypeRelationships(rootNode: SyntaxNode, filePath: string): RawTy
   return results;
 }
 
+function extractLocalVariables(rootNode: SyntaxNode, lineStart: number, lineEnd: number): Array<{ name: string; type: string }> {
+  const vars: Array<{ name: string; type: string }> = [];
+
+  for (const node of walkNodes(rootNode, ["local_declaration_statement"])) {
+    if (node.startPosition.row < lineStart || node.endPosition.row > lineEnd) continue;
+    const varDecl = node.children.find((c: SyntaxNode) => c.type === "variable_declaration");
+    if (!varDecl) continue;
+    const typeNode = varDecl.childForFieldName("type");
+    if (!typeNode || typeNode.text === "var") continue;
+    const typeName = extractPrimaryTypeName(typeNode);
+    if (CSHARP_PRIMITIVE_TYPES.has(typeName)) continue;
+    for (const decl of walkNodes(varDecl, ["variable_declarator"])) {
+      const nameNode = decl.childForFieldName("name");
+      if (nameNode) vars.push({ name: nameNode.text, type: typeName });
+    }
+  }
+
+  for (const node of walkNodes(rootNode, ["for_each_statement"])) {
+    if (node.startPosition.row < lineStart || node.endPosition.row > lineEnd) continue;
+    const typeNode = node.childForFieldName("type");
+    const nameNode = node.childForFieldName("left");
+    if (!typeNode || !nameNode || typeNode.text === "var") continue;
+    const typeName = extractPrimaryTypeName(typeNode);
+    if (!CSHARP_PRIMITIVE_TYPES.has(typeName)) {
+      vars.push({ name: nameNode.text, type: typeName });
+    }
+  }
+
+  return vars;
+}
+
 export const csharpConfig: TreeSitterLanguageConfig = {
   grammar: require("tree-sitter-c-sharp"),
   extensions: [".cs"],
-  extractFunctions, extractCalls, extractImports, extractDocstring: getXmlDoc, extractTypeRelationships,
+  extractFunctions, extractCalls, extractImports, extractDocstring: getXmlDoc, extractTypeRelationships, extractLocalVariables,
 
   testDecorators: ["@[Test]", "@[TestMethod]", "@[Fact]", "@[Theory]", "@[TestFixture]", "@[SetUp]", "@[TearDown]"],
   testImportPrefixes: ["NUnit", "Xunit", "Microsoft.VisualStudio.TestTools", "Moq", "FluentAssertions"],

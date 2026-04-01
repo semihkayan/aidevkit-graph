@@ -249,10 +249,31 @@ function extractTypeRelationships(rootNode: SyntaxNode, filePath: string): RawTy
   return results;
 }
 
+const PY_SKIP_TYPES = new Set(["int", "float", "str", "bool", "bytes", "None", "Any", "object"]);
+
+function extractLocalVariables(rootNode: SyntaxNode, lineStart: number, lineEnd: number): Array<{ name: string; type: string }> {
+  const vars: Array<{ name: string; type: string }> = [];
+
+  for (const node of walkNodes(rootNode, ["assignment"])) {
+    if (node.startPosition.row < lineStart || node.endPosition.row > lineEnd) continue;
+    const typeNode = node.childForFieldName("type");
+    const nameNode = node.childForFieldName("left");
+    if (!typeNode || !nameNode || nameNode.type !== "identifier") continue;
+    const typeName = typeNode.type === "identifier" ? typeNode.text
+      : typeNode.type === "attribute" ? typeNode.text.split(".").pop() ?? typeNode.text
+      : null;
+    if (typeName && !PY_SKIP_TYPES.has(typeName)) {
+      vars.push({ name: nameNode.text, type: typeName });
+    }
+  }
+
+  return vars;
+}
+
 export const pythonConfig: TreeSitterLanguageConfig = {
   grammar: require("tree-sitter-python"),
   extensions: [".py"],
-  extractFunctions, extractCalls, extractImports, extractDocstring: getDocstring, extractTypeRelationships,
+  extractFunctions, extractCalls, extractImports, extractDocstring: getDocstring, extractTypeRelationships, extractLocalVariables,
 
   testDecorators: ["@pytest.mark"],
   testImportPrefixes: ["pytest", "unittest", "hypothesis"],

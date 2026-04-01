@@ -137,10 +137,34 @@ function extractTypeRelationships(rootNode: SyntaxNode, filePath: string): RawTy
   return results;
 }
 
+const GO_SKIP_TYPES = new Set([
+  "int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32", "uint64",
+  "float32", "float64", "complex64", "complex128", "string", "bool", "byte", "rune", "error", "any",
+]);
+
+function extractLocalVariables(rootNode: SyntaxNode, lineStart: number, lineEnd: number): Array<{ name: string; type: string }> {
+  const vars: Array<{ name: string; type: string }> = [];
+
+  for (const node of walkNodes(rootNode, ["var_declaration"])) {
+    if (node.startPosition.row < lineStart || node.endPosition.row > lineEnd) continue;
+    for (const spec of walkNodes(node, ["var_spec"])) {
+      const nameNode = spec.childForFieldName("name");
+      const typeNode = spec.childForFieldName("type");
+      if (!nameNode || !typeNode) continue;
+      const typeName = typeNode.text.replace(/^\*/, "");
+      if (!GO_SKIP_TYPES.has(typeName)) {
+        vars.push({ name: nameNode.text, type: typeName });
+      }
+    }
+  }
+
+  return vars;
+}
+
 export const goConfig: TreeSitterLanguageConfig = {
   grammar: require("tree-sitter-go"),
   extensions: [".go"],
-  extractFunctions, extractCalls, extractImports, extractDocstring: getDocComment, extractTypeRelationships,
+  extractFunctions, extractCalls, extractImports, extractDocstring: getDocComment, extractTypeRelationships, extractLocalVariables,
 
   testImportPrefixes: ["testing", "github.com/stretchr/testify"],
   noiseTargets: [

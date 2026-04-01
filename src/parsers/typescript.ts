@@ -462,10 +462,41 @@ function buildSignature(name: string, params: string, returnType: string | null)
   return returnType ? `${name}${params}: ${returnType}` : `${name}${params}`;
 }
 
+const TS_SKIP_TYPES = new Set([
+  "string", "number", "boolean", "void", "any", "unknown", "never", "undefined", "null", "bigint", "symbol",
+]);
+
+function extractLocalVariables(rootNode: SyntaxNode, lineStart: number, lineEnd: number): Array<{ name: string; type: string }> {
+  const vars: Array<{ name: string; type: string }> = [];
+
+  for (const node of walkNodes(rootNode, ["lexical_declaration"])) {
+    if (node.startPosition.row < lineStart || node.endPosition.row > lineEnd) continue;
+    for (const decl of walkNodes(node, ["variable_declarator"])) {
+      const nameNode = decl.childForFieldName("name");
+      if (!nameNode || nameNode.type !== "identifier") continue;
+      const typeAnnotation = decl.children.find((c: SyntaxNode) => c.type === "type_annotation");
+      if (!typeAnnotation) continue;
+      const typeNode = typeAnnotation.children.find((c: SyntaxNode) =>
+        c.type === "type_identifier" || c.type === "generic_type" || c.type === "predefined_type"
+          || c.type === "array_type" || c.type === "union_type"
+      );
+      if (!typeNode) continue;
+      const typeName = typeNode.type === "generic_type"
+        ? typeNode.children.find((c: SyntaxNode) => c.type === "type_identifier")?.text ?? typeNode.text
+        : typeNode.type === "type_identifier" ? typeNode.text : null;
+      if (typeName && !TS_SKIP_TYPES.has(typeName)) {
+        vars.push({ name: nameNode.text, type: typeName });
+      }
+    }
+  }
+
+  return vars;
+}
+
 export const typescriptConfig: TreeSitterLanguageConfig = {
   grammar: require("tree-sitter-typescript").typescript,
   extensions: [".ts"],
-  extractFunctions, extractCalls, extractImports, extractDocstring: getJSDoc, extractTypeRelationships,
+  extractFunctions, extractCalls, extractImports, extractDocstring: getJSDoc, extractTypeRelationships, extractLocalVariables,
 
   testImportPrefixes: [
     "jest", "vitest", "@jest", "@testing-library", "enzyme", "supertest", "@playwright/test", "cypress",

@@ -143,10 +143,34 @@ function extractTypeRelationships(rootNode: SyntaxNode, filePath: string): RawTy
   return results;
 }
 
+const RUST_SKIP_TYPES = new Set([
+  "i8", "i16", "i32", "i64", "i128", "isize",
+  "u8", "u16", "u32", "u64", "u128", "usize",
+  "f32", "f64", "bool", "char", "str", "String",
+]);
+
+function extractLocalVariables(rootNode: SyntaxNode, lineStart: number, lineEnd: number): Array<{ name: string; type: string }> {
+  const vars: Array<{ name: string; type: string }> = [];
+
+  for (const node of walkNodes(rootNode, ["let_declaration"])) {
+    if (node.startPosition.row < lineStart || node.endPosition.row > lineEnd) continue;
+    const typeNode = node.childForFieldName("type");
+    const patternNode = node.childForFieldName("pattern");
+    if (!typeNode || !patternNode) continue;
+    if (patternNode.type !== "identifier") continue;
+    const typeName = typeNode.text.replace(/^&\s*(mut\s+)?/, "");
+    if (!RUST_SKIP_TYPES.has(typeName)) {
+      vars.push({ name: patternNode.text, type: typeName });
+    }
+  }
+
+  return vars;
+}
+
 export const rustConfig: TreeSitterLanguageConfig = {
   grammar: require("tree-sitter-rust"),
   extensions: [".rs"],
-  extractFunctions, extractCalls, extractImports, extractDocstring: getDocComment, extractTypeRelationships,
+  extractFunctions, extractCalls, extractImports, extractDocstring: getDocComment, extractTypeRelationships, extractLocalVariables,
 
   testDecorators: ["#[test]", "#[cfg(test)]"],
   testImportPrefixes: ["mockall", "proptest"],
