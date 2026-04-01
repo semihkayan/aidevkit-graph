@@ -73,6 +73,7 @@ type EnrichedResult = {
   summary: string;
   tags: string[];
   score: number;
+  confidence?: "high" | "partial";
   line_start: number;
   line_end: number;
   workspace?: string;
@@ -242,11 +243,13 @@ export async function handleSemanticSearch(
   // Merge results with workspace balance (prevents one workspace from dominating)
   const finalResults = mergeWithWorkspaceBalance(allResults, topK);
 
-  // Clean up: remove internal record reference, round scores, handle workspace field
+  // Clean up: remove internal record reference, round scores, assign confidence, handle workspace field
   const showWorkspace = ctx.isMultiWorkspace;
+  const highThreshold = ctx.config.search.highConfidenceThreshold;
   for (const r of finalResults) {
     delete (r as any).record;
     r.score = Math.round(r.score * 1000) / 1000;
+    r.confidence = r.score >= highThreshold ? "high" : "partial";
     if (!showWorkspace) delete r.workspace;
   }
 

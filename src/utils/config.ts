@@ -43,6 +43,7 @@ const ConfigSchema = z.object({
     maxTokenBudget: z.number().default(4000),
   }).default({}),
   search: z.object({
+    highConfidenceThreshold: z.number().min(0).max(1).default(0.6),
     rrfK: z.number().default(60),
     expandCamelCase: z.boolean().default(true),
     exactNameBoost: z.boolean().default(true),

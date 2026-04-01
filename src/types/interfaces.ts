@@ -308,6 +308,7 @@ export interface Config {
     maxTokenBudget: number;
   };
   search: {
+    highConfidenceThreshold: number;
     rrfK: number;
     expandCamelCase: boolean;
     exactNameBoost: boolean;
