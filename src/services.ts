@@ -122,7 +122,7 @@ export async function createServices(projectRoot?: string): Promise<AppContext> 
     isMultiWorkspace,
     config,
     embedding,
-    embeddingAvailable: await embedding.isAvailable(),
+    embeddingAvailable: false,
     parsers,
     conventions,
     noiseFilter,
@@ -150,16 +150,22 @@ export async function createServices(projectRoot?: string): Promise<AppContext> 
   };
 }
 
+export interface WorkspaceEmbedPlan {
+  freshBuild: boolean;
+  staleIds: string[];
+  vectorCount: number;
+}
+
 /**
  * Initialize all workspaces: load/build AST index, vector DB, type graph, call graph.
+ * Returns per-workspace embed metadata for backgroundEmbed().
  * Shared between MCP server (index.ts) and test harness.
  */
 export async function initializeWorkspaces(ctx: AppContext, opts?: {
-  embed?: boolean;
   refreshStale?: boolean;
-}): Promise<void> {
-  const embed = opts?.embed !== false;
+}): Promise<Map<string, WorkspaceEmbedPlan>> {
   const refreshStale = opts?.refreshStale !== false;
+  const embedPlans = new Map<string, WorkspaceEmbedPlan>();
 
   for (const wsPath of ctx.workspacePaths) {
     try {
@@ -215,15 +221,43 @@ export async function initializeWorkspaces(ctx: AppContext, opts?: {
       logger.info({ workspace: wsPath, ...cgStats, ...tgStats, fromCache: cgLoaded && tgLoaded },
         cgLoaded && tgLoaded ? "Graphs loaded from cache" : "Graphs built");
 
-      // Embedding
-      if (embed && ctx.embeddingAvailable && (vectorCount === 0 || freshBuild)) {
-        logger.info({ workspace: wsPath }, "Embedding all functions...");
+      embedPlans.set(wsPath, { freshBuild, staleIds, vectorCount });
+    } catch (err) {
+      logger.error({ workspace: wsPath, err }, "Workspace initialization failed, skipping");
+    }
+  }
+
+  ctx.ready = true;
+  return embedPlans;
+}
+
+/**
+ * Background embedding: check Ollama, then embed based on the plan from
+ * initializeWorkspaces. Sets ctx.embeddingAvailable as a side effect.
+ * Fire-and-forget after server.connect().
+ */
+export async function backgroundEmbed(
+  ctx: AppContext,
+  plans: Map<string, WorkspaceEmbedPlan>,
+): Promise<void> {
+  ctx.embeddingAvailable = await ctx.embedding.isAvailable();
+  if (!ctx.embeddingAvailable) {
+    logger.info("Embedding unavailable (Ollama not running), skipping background embed");
+    return;
+  }
+
+  for (const [wsPath, plan] of plans) {
+    try {
+      const ws = ctx.resolveWorkspace(wsPath);
+      if (plan.vectorCount === 0 || plan.freshBuild) {
         const allIds = ws.index.getAllFilePaths().flatMap(fp => ws.index.getFileRecordIds(fp));
+        if (allIds.length === 0) continue;
+        logger.info({ workspace: wsPath, functions: allIds.length }, "Embedding all functions...");
         await reembedFunctions(allIds, ws.index, ctx.embedding, ws.vectorDb, ctx.config, ws.callGraph);
-        logger.info({ workspace: wsPath, embedded: await ws.vectorDb.countRows() }, "Embedding complete");
-      } else if (embed && ctx.embeddingAvailable && staleIds.length > 0) {
-        const deletedIds = staleIds.filter(id => !ws.index.getById(id));
-        const changedIds = staleIds.filter(id => ws.index.getById(id));
+        logger.info({ workspace: wsPath, embedded: await ws.vectorDb.countRows() }, "Background embedding complete");
+      } else if (plan.staleIds.length > 0) {
+        const deletedIds = plan.staleIds.filter(id => !ws.index.getById(id));
+        const changedIds = plan.staleIds.filter(id => ws.index.getById(id));
         if (deletedIds.length > 0) await ws.vectorDb.deleteByIds(deletedIds);
         if (changedIds.length > 0) {
           await reembedFunctions(changedIds, ws.index, ctx.embedding, ws.vectorDb, ctx.config, ws.callGraph);
@@ -231,9 +265,7 @@ export async function initializeWorkspaces(ctx: AppContext, opts?: {
         logger.info({ workspace: wsPath, reembedded: changedIds.length, deleted: deletedIds.length }, "Stale vectors updated");
       }
     } catch (err) {
-      logger.error({ workspace: wsPath, err }, "Workspace initialization failed, skipping");
+      logger.error({ workspace: wsPath, err }, "Background embedding failed for workspace");
     }
   }
-
-  ctx.ready = true;
 }

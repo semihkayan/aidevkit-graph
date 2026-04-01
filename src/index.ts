@@ -3,7 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import path from "node:path";
 import { writeFileSync, unlinkSync, mkdirSync } from "node:fs";
-import { createServices, initializeWorkspaces } from "./services.js";
+import { createServices, initializeWorkspaces, backgroundEmbed } from "./services.js";
 import { logger } from "./utils/logger.js";
 
 // Schemas
@@ -101,18 +101,19 @@ async function main() {
   // StdioServerTransport.send() writes to stdout — if the client dies, the write emits 'error'.
   process.stdout.on('error', () => { /* pipe closed by MCP client */ });
 
-  // Connect transport immediately — MCP handshake completes fast
+  // Initialize workspaces BEFORE connect — agent never sees NOT_READY.
+  let embedPlans: Awaited<ReturnType<typeof initializeWorkspaces>>;
+  try {
+    embedPlans = await initializeWorkspaces(services);
+  } catch (err) {
+    logger.error({ err }, "Initialization failed — server alive, tools return NOT_READY");
+    embedPlans = new Map();
+  }
+
+  // Connect transport — index + graphs loaded, tools ready.
   const transport = new StdioServerTransport();
   await server.connect(transport);
   logger.info("MCP server connected via stdio");
-
-  // Initialize all workspaces — heavy work after MCP connection is live.
-  // Catch so that init failure doesn't kill the connected server (tools return NOT_READY).
-  try {
-    await initializeWorkspaces(services);
-  } catch (err) {
-    logger.error({ err }, "Initialization failed — server alive, tools return NOT_READY");
-  }
 
   // Start file watcher — auto-reindex on file changes
   try {
@@ -121,6 +122,11 @@ async function main() {
     logger.error({ err }, "FileWatcher failed to start");
   }
   logger.info("Initialization complete.");
+
+  // Background: check Ollama, embed if needed (does not block tools)
+  backgroundEmbed(services, embedPlans).catch(err => {
+    logger.error({ err }, "Background embedding failed");
+  });
 }
 
 main().catch((err) => {

@@ -274,7 +274,7 @@ export interface AppContext {
   readonly isMultiWorkspace: boolean;
   readonly config: Readonly<Config>;
   readonly embedding: IEmbeddingProvider;
-  readonly embeddingAvailable: boolean;
+  embeddingAvailable: boolean;
   readonly parsers: ILanguageParser[];
   readonly conventions: LanguageConventions;
   readonly noiseFilter: NoiseFilterMetadata;

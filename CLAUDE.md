@@ -36,7 +36,7 @@ types/interfaces.ts  → All interfaces
 
 ### Key design decisions
 
-- **MCP connects before indexing** — `server.connect()` happens first, heavy init runs after. Otherwise Claude Code times out waiting for MCP handshake.
+- **MCP connects after indexing** — `initializeWorkspaces()` runs first so tools are ready on first agent call. Embedding runs in the background after connect via `backgroundEmbed()`. Cached init takes <2s, well within MCP client timeout.
 - **`ready` flag** — tools return `NOT_READY` error until init completes (`tool-utils.ts:checkReady()`).
 - **ReindexOrchestrator** (`core/reindex-orchestrator.ts`) — single place for all reindex workflows (full, incremental, file-level, watcher). Tool handler and watcher both delegate to it.
 - **Graph persistence** — call graph and type graph cached as JSON in `.code-context/`. Validated via index fingerprint (SHA-256 of file hashes). Mismatch → full rebuild.
@@ -108,7 +108,7 @@ export async function handleToolName(args: { ... }, ctx: AppContext) {
 
 `TestHarness` (`src/test-harness.ts`) — test MCP tools against any project. Three modes: `testAll()` runs 45 built-in generic tests, `run([...])` executes agent-defined cases in bulk, `call()` for single manual calls. `close()` releases memory (clear all index/graph maps).
 
-`initializeWorkspaces()` in `services.ts` — shared init logic between MCP server and test harness. `embed` option controls whether embedding runs (harness skips it for speed).
+`initializeWorkspaces()` in `services.ts` — shared init logic between MCP server and test harness. Returns `WorkspaceEmbedPlan` per workspace; MCP server passes this to `backgroundEmbed()`, test harness ignores it.
 
 ## Gotchas
 

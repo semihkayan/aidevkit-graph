@@ -68,7 +68,8 @@ export class TestHarness {
     console.log(`Setting up: ${absPath}`);
 
     const ctx = await createServices(absPath);
-    await initializeWorkspaces(ctx, { embed: false });
+    await initializeWorkspaces(ctx);
+    ctx.embeddingAvailable = await ctx.embedding.isAvailable();
 
     for (const wsPath of ctx.workspacePaths) {
       const ws = ctx.resolveWorkspace(wsPath);
