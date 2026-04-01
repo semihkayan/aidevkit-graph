@@ -210,24 +210,27 @@ export async function handleSemanticSearch(
   // Normalize scope: strip source root prefixes, convert dot notation
   const scope = args.scope ? ctx.normalizeModuleQuery(args.scope).pop()! : undefined;
 
-  // Search all resolved workspaces and merge results
-  const allResults: EnrichedResult[] = [];
-  let totalDesync = 0;
-  let totalIndexed = 0;
-  let totalVectors = 0;
+  // Search all workspaces in parallel (each has independent pipeline, index, and vector DB)
+  const searchOptions = { scope, tags_filter: args.tags_filter, side_effects_filter: args.side_effects_filter };
 
-  for (const { ws, wsPath } of resolved.workspaces) {
-    const { results, desyncCount } = await searchSingleWorkspace(
-      ws, wsPath, query, topK,
-      { scope, tags_filter: args.tags_filter, side_effects_filter: args.side_effects_filter },
-      ctx,
-    );
+  const outcomes = await Promise.all(
+    resolved.workspaces.map(async ({ ws, wsPath }) => {
+      const { results, desyncCount } = await searchSingleWorkspace(
+        ws, wsPath, query, topK, searchOptions, ctx,
+      );
+      const stats = ws.index.getStats();
+      const vectorCount = await ws.vectorDb.countRows();
+      return { results, desyncCount, indexed: stats.functions + stats.classes, vectorCount };
+    })
+  );
+
+  const allResults: EnrichedResult[] = [];
+  let totalDesync = 0, totalIndexed = 0, totalVectors = 0;
+  for (const { results, desyncCount, indexed, vectorCount } of outcomes) {
     allResults.push(...results);
     totalDesync += desyncCount;
-
-    const stats = ws.index.getStats();
-    totalIndexed += stats.functions + stats.classes;
-    totalVectors += await ws.vectorDb.countRows();
+    totalIndexed += indexed;
+    totalVectors += vectorCount;
   }
 
   // Merge results with workspace balance (prevents one workspace from dominating)
