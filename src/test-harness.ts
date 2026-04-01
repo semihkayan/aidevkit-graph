@@ -158,7 +158,9 @@ export class TestHarness {
     const handler = HANDLERS[tool];
     if (!handler) throw new Error(`Unknown tool: ${tool}`);
     const result = await handler(args ?? {}, this.ctx);
-    return JSON.parse(result?.content?.[0]?.text ?? "null");
+    const data = JSON.parse(result?.content?.[0]?.text ?? "null");
+    if (result?.isError) data._isError = true;
+    return data;
   }
 
   async callRaw(tool: string, args?: Record<string, unknown>): Promise<{

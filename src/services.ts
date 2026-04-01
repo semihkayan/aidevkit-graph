@@ -162,72 +162,76 @@ export async function initializeWorkspaces(ctx: AppContext, opts?: {
   const refreshStale = opts?.refreshStale !== false;
 
   for (const wsPath of ctx.workspacePaths) {
-    const ws = ctx.resolveWorkspace(wsPath);
-    await ws.indexWriter.loadFromDisk();
+    try {
+      const ws = ctx.resolveWorkspace(wsPath);
+      await ws.indexWriter.loadFromDisk();
 
-    const stats = ws.index.getStats();
-    let staleIds: string[] = [];
-    let freshBuild = false;
-    if (stats.files === 0) {
-      logger.info({ workspace: wsPath }, "Empty index, building...");
-      await ws.indexWriter.buildFull(ws.projectRoot);
-      await ws.indexWriter.saveToDisk();
-      freshBuild = true;
-      logger.info({ workspace: wsPath, ...ws.index.getStats() }, "Index built");
-    } else {
-      logger.info({ workspace: wsPath, ...stats }, "Index loaded from cache");
-      if (refreshStale) {
-        staleIds = await ws.indexWriter.refreshStale(ws.projectRoot);
-        if (staleIds.length > 0) {
-          await ws.indexWriter.saveToDisk();
-          logger.info({ workspace: wsPath, updated: staleIds.length }, "Stale files refreshed");
+      const stats = ws.index.getStats();
+      let staleIds: string[] = [];
+      let freshBuild = false;
+      if (stats.files === 0) {
+        logger.info({ workspace: wsPath }, "Empty index, building...");
+        await ws.indexWriter.buildFull(ws.projectRoot);
+        await ws.indexWriter.saveToDisk();
+        freshBuild = true;
+        logger.info({ workspace: wsPath, ...ws.index.getStats() }, "Index built");
+      } else {
+        logger.info({ workspace: wsPath, ...stats }, "Index loaded from cache");
+        if (refreshStale) {
+          staleIds = await ws.indexWriter.refreshStale(ws.projectRoot);
+          if (staleIds.length > 0) {
+            await ws.indexWriter.saveToDisk();
+            logger.info({ workspace: wsPath, updated: staleIds.length }, "Stale files refreshed");
+          }
         }
       }
-    }
 
-    // Vector DB
-    const lancePath = path.join(ctx.config.projectRoot, ".code-context", "lance");
-    const tableName = wsPath === "." ? "functions" : `${wsPath}_functions`;
-    await ws.vectorDb.initialize(lancePath, tableName);
-    const vectorCount = await ws.vectorDb.countRows();
-    logger.info({ workspace: wsPath, vectorCount }, "Vector DB initialized");
+      // Vector DB
+      const lancePath = path.join(ctx.config.projectRoot, ".code-context", "lance");
+      const tableName = wsPath === "." ? "functions" : `${wsPath}_functions`;
+      await ws.vectorDb.initialize(lancePath, tableName);
+      const vectorCount = await ws.vectorDb.countRows();
+      logger.info({ workspace: wsPath, vectorCount }, "Vector DB initialized");
 
-    // Graphs — type graph first (call graph uses it for interface resolution)
-    const graphCacheDir = wsPath === "."
-      ? path.join(ctx.config.projectRoot, ".code-context")
-      : path.join(ctx.config.projectRoot, ".code-context", wsPath);
+      // Graphs — type graph first (call graph uses it for interface resolution)
+      const graphCacheDir = wsPath === "."
+        ? path.join(ctx.config.projectRoot, ".code-context")
+        : path.join(ctx.config.projectRoot, ".code-context", wsPath);
 
-    const tgLoaded = await ws.typeGraphWriter.loadFromDisk(graphCacheDir, ws.index);
-    if (!tgLoaded) {
-      await ws.typeGraphWriter.build(ws.index, ctx.parsers, ws.projectRoot);
-      await ws.typeGraphWriter.saveToDisk(graphCacheDir, ws.index);
-    }
-
-    const cgLoaded = await ws.callGraphWriter.loadFromDisk(graphCacheDir, ws.index);
-    if (!cgLoaded) {
-      await ws.callGraphWriter.build(ws.index, ws.projectRoot);
-      await ws.callGraphWriter.saveToDisk(graphCacheDir, ws.index);
-    }
-
-    const cgStats = ws.callGraph.getStats();
-    const tgStats = ws.typeGraph.getStats();
-    logger.info({ workspace: wsPath, ...cgStats, ...tgStats, fromCache: cgLoaded && tgLoaded },
-      cgLoaded && tgLoaded ? "Graphs loaded from cache" : "Graphs built");
-
-    // Embedding
-    if (embed && ctx.embeddingAvailable && (vectorCount === 0 || freshBuild)) {
-      logger.info({ workspace: wsPath }, "Embedding all functions...");
-      const allIds = ws.index.getAllFilePaths().flatMap(fp => ws.index.getFileRecordIds(fp));
-      await reembedFunctions(allIds, ws.index, ctx.embedding, ws.vectorDb, ctx.config, ws.callGraph);
-      logger.info({ workspace: wsPath, embedded: await ws.vectorDb.countRows() }, "Embedding complete");
-    } else if (embed && ctx.embeddingAvailable && staleIds.length > 0) {
-      const deletedIds = staleIds.filter(id => !ws.index.getById(id));
-      const changedIds = staleIds.filter(id => ws.index.getById(id));
-      if (deletedIds.length > 0) await ws.vectorDb.deleteByIds(deletedIds);
-      if (changedIds.length > 0) {
-        await reembedFunctions(changedIds, ws.index, ctx.embedding, ws.vectorDb, ctx.config, ws.callGraph);
+      const tgLoaded = await ws.typeGraphWriter.loadFromDisk(graphCacheDir, ws.index);
+      if (!tgLoaded) {
+        await ws.typeGraphWriter.build(ws.index, ctx.parsers, ws.projectRoot);
+        await ws.typeGraphWriter.saveToDisk(graphCacheDir, ws.index);
       }
-      logger.info({ workspace: wsPath, reembedded: changedIds.length, deleted: deletedIds.length }, "Stale vectors updated");
+
+      const cgLoaded = await ws.callGraphWriter.loadFromDisk(graphCacheDir, ws.index);
+      if (!cgLoaded) {
+        await ws.callGraphWriter.build(ws.index, ws.projectRoot);
+        await ws.callGraphWriter.saveToDisk(graphCacheDir, ws.index);
+      }
+
+      const cgStats = ws.callGraph.getStats();
+      const tgStats = ws.typeGraph.getStats();
+      logger.info({ workspace: wsPath, ...cgStats, ...tgStats, fromCache: cgLoaded && tgLoaded },
+        cgLoaded && tgLoaded ? "Graphs loaded from cache" : "Graphs built");
+
+      // Embedding
+      if (embed && ctx.embeddingAvailable && (vectorCount === 0 || freshBuild)) {
+        logger.info({ workspace: wsPath }, "Embedding all functions...");
+        const allIds = ws.index.getAllFilePaths().flatMap(fp => ws.index.getFileRecordIds(fp));
+        await reembedFunctions(allIds, ws.index, ctx.embedding, ws.vectorDb, ctx.config, ws.callGraph);
+        logger.info({ workspace: wsPath, embedded: await ws.vectorDb.countRows() }, "Embedding complete");
+      } else if (embed && ctx.embeddingAvailable && staleIds.length > 0) {
+        const deletedIds = staleIds.filter(id => !ws.index.getById(id));
+        const changedIds = staleIds.filter(id => ws.index.getById(id));
+        if (deletedIds.length > 0) await ws.vectorDb.deleteByIds(deletedIds);
+        if (changedIds.length > 0) {
+          await reembedFunctions(changedIds, ws.index, ctx.embedding, ws.vectorDb, ctx.config, ws.callGraph);
+        }
+        logger.info({ workspace: wsPath, reembedded: changedIds.length, deleted: deletedIds.length }, "Stale vectors updated");
+      }
+    } catch (err) {
+      logger.error({ workspace: wsPath, err }, "Workspace initialization failed, skipping");
     }
   }
 
