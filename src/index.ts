@@ -25,6 +25,15 @@ import { handleStaleDocstrings } from "./tools/stale-docstrings.js";
 import { handleReindex } from "./tools/reindex.js";
 
 async function main() {
+  // Global error handlers — prevent unhandled errors from killing the server process.
+  // "Not connected" is always worse than a degraded server.
+  process.on('unhandledRejection', (reason) => {
+    logger.error({ err: reason }, "Unhandled rejection (server staying alive)");
+  });
+  process.on('uncaughtException', (err) => {
+    logger.error({ err }, "Uncaught exception (server staying alive)");
+  });
+
   const services = await createServices();
   logger.info({ projectRoot: services.config.projectRoot }, "Code Intelligence MCP Server starting");
 
@@ -88,16 +97,29 @@ async function main() {
   process.on("SIGINT", shutdown);
   process.on("exit", removeLock);
 
+  // Prevent stdout write errors (client pipe closed) from becoming uncaught exceptions.
+  // StdioServerTransport.send() writes to stdout — if the client dies, the write emits 'error'.
+  process.stdout.on('error', () => { /* pipe closed by MCP client */ });
+
   // Connect transport immediately — MCP handshake completes fast
   const transport = new StdioServerTransport();
   await server.connect(transport);
   logger.info("MCP server connected via stdio");
 
-  // Initialize all workspaces — heavy work after MCP connection is live
-  await initializeWorkspaces(services);
+  // Initialize all workspaces — heavy work after MCP connection is live.
+  // Catch so that init failure doesn't kill the connected server (tools return NOT_READY).
+  try {
+    await initializeWorkspaces(services);
+  } catch (err) {
+    logger.error({ err }, "Initialization failed — server alive, tools return NOT_READY");
+  }
 
   // Start file watcher — auto-reindex on file changes
-  services.watcher.start();
+  try {
+    services.watcher.start();
+  } catch (err) {
+    logger.error({ err }, "FileWatcher failed to start");
+  }
   logger.info("Initialization complete.");
 }
 
