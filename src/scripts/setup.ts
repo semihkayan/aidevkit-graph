@@ -54,6 +54,31 @@ async function confirm(question: string): Promise<boolean> {
   });
 }
 
+// === Version Helpers ===
+
+function getInstalledVersion(): string | null {
+  const raw = runOrNull("npm list -g @codeweave/mcp --depth=0 --json");
+  if (!raw) return null;
+  try {
+    const data = JSON.parse(raw);
+    return data.dependencies?.["@codeweave/mcp"]?.version ?? null;
+  } catch { return null; }
+}
+
+function getLatestVersion(): string | null {
+  return runOrNull("npm view @codeweave/mcp version");
+}
+
+function isNewerVersion(latest: string, installed: string): boolean {
+  const a = latest.split(".").map(Number);
+  const b = installed.split(".").map(Number);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    if ((a[i] || 0) > (b[i] || 0)) return true;
+    if ((a[i] || 0) < (b[i] || 0)) return false;
+  }
+  return false;
+}
+
 // === Project Detection ===
 
 const MANIFESTS = ["package.json", "build.gradle", "build.gradle.kts", "pom.xml",
@@ -130,11 +155,29 @@ async function main() {
     process.exit(1);
   }
 
-  // === Step 1: Install package globally ===
+  // === Step 1: Install or update package globally ===
   step("1/5 Installing @codeweave/mcp...");
-  const isGloballyInstalled = runOrNull("npm list -g @codeweave/mcp --depth=0") !== null;
-  if (isGloballyInstalled) {
-    ok("Already installed");
+  let forceReindex = false;
+  const installedVersion = getInstalledVersion();
+  if (installedVersion) {
+    const latestVersion = getLatestVersion();
+    if (latestVersion && isNewerVersion(latestVersion, installedVersion)) {
+      log(`Installed: ${installedVersion}, Latest: ${latestVersion}`);
+      if (await confirm(`Update to ${latestVersion}?`)) {
+        runOrNull("npm install -g @codeweave/mcp@latest", { stdio: "inherit" });
+        const newVersion = getInstalledVersion();
+        if (newVersion && isNewerVersion(newVersion, installedVersion)) {
+          ok(`Updated to ${newVersion}`);
+          forceReindex = true;
+        } else {
+          warn("Update failed. Try manually: npm install -g @codeweave/mcp@latest");
+        }
+      } else {
+        ok(`Keeping ${installedVersion}`);
+      }
+    } else {
+      ok(`Up to date (${installedVersion})`);
+    }
   } else {
     runOrNull("npm install -g @codeweave/mcp", { stdio: "inherit" });
     if (runOrNull("npm list -g @codeweave/mcp --depth=0") !== null) {
@@ -288,11 +331,11 @@ async function main() {
   const hasAstCache = existsSync(path.join(codeContextDir, "ast-cache"));
   const hasVectors = existsSync(path.join(codeContextDir, "lance"));
 
-  if (hasAstCache && hasVectors) {
+  if (hasAstCache && hasVectors && !forceReindex) {
     ok("Already indexed. Run 'codeweave-init --force' to rebuild.");
   } else if (commandExists("codeweave-init")) {
     try {
-      execSync("codeweave-init", { stdio: "inherit", cwd });
+      execSync(`codeweave-init${forceReindex ? " --force" : ""}`, { stdio: "inherit", cwd });
       ok("Project indexed");
     } catch {
       warn("Indexing failed. Try manually: codeweave-init");
