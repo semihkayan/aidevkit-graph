@@ -251,6 +251,10 @@ export class FunctionIndex implements IFunctionIndexReader, IFunctionIndexWriter
     return raw.map(m => m.startsWith(prefix) ? m.slice(prefix.length) : m);
   }
 
+  getAll(): FunctionRecord[] {
+    return Array.from(this.records.values());
+  }
+
   getAllFilePaths(): string[] {
     return Array.from(this.fileIndex.keys());
   }

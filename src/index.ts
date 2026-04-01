@@ -47,7 +47,7 @@ async function main() {
   }, (args) => handleSemanticSearch(args as any, ctx));
 
   server.registerTool("get_module_summary", {
-    description: "List all functions and classes in a directory with their signatures.\n\nCRITICAL: Use this INSTEAD OF find, ls, tree, or Glob to explore what a module contains. File listings only give you names — this gives you function signatures, summaries, and structure. Saves tokens by showing metadata without source code. Auto-adapts detail level: full for small modules, compact for large ones. Use group_by='submodule' for large modules with sub-directories to get per-submodule breakdown with independent detail scaling. For very large modules (200+ functions), auto mode returns an 'overview' with per-submodule statistics only — drill into specific submodules for details.",
+    description: "List all functions and classes in a directory with their signatures.\n\nCRITICAL: Use this INSTEAD OF find, ls, tree, or Glob to explore what a module contains. File listings only give you names — this gives you function signatures, summaries, and structure. Saves tokens by showing metadata without source code. Auto-adapts detail level: full for small modules, compact for large ones. Use group_by='submodule' for large modules with sub-directories to get per-submodule breakdown with independent detail scaling. For very large modules (200+ functions), auto mode returns an 'overview' with per-submodule statistics only — drill into specific submodules for details. Use module='.' to get a top-level overview of the entire project structure.",
     inputSchema: ModuleSummarySchema.shape,
   }, (args) => handleModuleSummary(args as any, ctx));
 

@@ -22,6 +22,7 @@ export interface IFunctionIndexReader {
   getStats(): { files: number; functions: number; classes: number };
   getDocstringCoverage(): number;
   getLanguageStats(): Record<string, number>;
+  getAll(): FunctionRecord[];
 }
 
 // === Index: Write ===

@@ -11,15 +11,22 @@ export async function handleModuleSummary(
   if ("error" in resolved) return resolved.error;
 
   // Collect records from all workspaces
+  const isRootQuery = args.module === ".";
   const wsRecords: Array<{ wsPath: string; records: FunctionRecord[] }> = [];
   for (const { ws, wsPath } of resolved.workspaces) {
-    const records = ws.index.getByModule(args.module);
+    const records = isRootQuery
+      ? ws.index.getAll()
+      : ws.index.getByModule(args.module);
     if (records.length > 0) {
       wsRecords.push({ wsPath, records });
     }
   }
 
   if (wsRecords.length === 0) {
+    if (isRootQuery) {
+      return errorResponse("MODULE_NOT_FOUND", "No indexed functions found.");
+    }
+
     // Suggest similar modules from all workspaces
     const allModules = new Set<string>();
     for (const { ws } of resolved.workspaces) {
@@ -33,6 +40,9 @@ export async function handleModuleSummary(
     const hints: string[] = [];
     if (suggestions.length > 0) hints.push(`Did you mean: ${suggestions.join(", ")}?`);
     if (examples.length > 0) hints.push(`Available modules include: ${examples.join(", ")}`);
+    if (looksLikeSourceRoot(args.module, ctx)) {
+      hints.push("This looks like a source root (stripped from module paths). Use module '.' for a top-level project overview.");
+    }
 
     return errorResponse("MODULE_NOT_FOUND",
       `Module '${args.module}' not found${resolved.workspaces.length > 1 ? " in any workspace" : ""}.`,
@@ -198,17 +208,27 @@ function buildOverview(module: string, records: FunctionRecord[]): Record<string
     });
 
   const exampleSub = submodules.find(s => s.submodule !== "(root)")?.submodule;
+  const isRoot = module === ".";
   const hint = hasSubmodules
-    ? `Query specific submodules for details (e.g., module: '${module}/${exampleSub}')`
+    ? isRoot
+      ? `Query specific submodules for details (e.g., module: '${exampleSub}')`
+      : `Query specific submodules for details (e.g., module: '${module}/${exampleSub}')`
     : "Use the file: parameter to explore specific files, or try a more specific module path.";
 
-  return {
+  const result: Record<string, unknown> = {
     module,
     mode: "overview",
     total: records.length,
     submodules,
     hint,
   };
+
+  if (isRoot) {
+    const base = findCommonModuleBase(records);
+    if (base) result.common_base = base;
+  }
+
+  return result;
 }
 
 function applyBudgetGuard(
@@ -454,4 +474,16 @@ function kindSortOrder(r: FunctionRecord): number {
 
 function sortByKind<T extends { record: FunctionRecord }>(items: T[]): T[] {
   return [...items].sort((a, b) => kindSortOrder(a.record) - kindSortOrder(b.record));
+}
+
+// === Source root detection ===
+
+function looksLikeSourceRoot(query: string, ctx: AppContext): boolean {
+  const roots: string[] = [];
+  if (ctx.config.parser.sourceRoot) roots.push(ctx.config.parser.sourceRoot);
+  for (const r of ctx.conventions.sourceRoots) {
+    roots.push(r.replace(/\/+$/, ""));
+  }
+  const q = query.replace(/\/+$/, "");
+  return roots.some(r => r === q || r.startsWith(q + "/"));
 }

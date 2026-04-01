@@ -14,7 +14,7 @@ export const SemanticSearchSchema = z.object({
 });
 
 export const ModuleSummarySchema = z.object({
-  module: z.string().min(1).describe("Directory path relative to project root (e.g., 'payments', 'domain/order', 'src/components'). Returns all functions in this directory and subdirectories. Source root prefixes are automatically stripped. Dot notation is converted to path separators (e.g., 'com.example.service' → 'com/example/service')."),
+  module: z.string().min(1).describe("Directory path relative to project root (e.g., 'payments', 'domain/order', 'src/components'). Returns all functions in this directory and subdirectories. Source root prefixes are automatically stripped. Dot notation is converted to path separators (e.g., 'com.example.service' → 'com/example/service'). Use '.' for a top-level overview of the entire project."),
   workspace,
   file: z.string().optional().describe("Focus on a single file within the module (e.g., 'checkout.py'). Omit to see the entire module."),
   detail: z.enum(["auto", "full", "compact", "files_only", "overview"]).default("auto").describe(

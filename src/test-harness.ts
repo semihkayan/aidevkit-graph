@@ -376,6 +376,9 @@ function buildModuleSummaryTests(ctx: AppContext, ds: DiscoveryState): TestCase[
     { tool: "get_module_summary", args: { module: "___nonexistent___" },
       label: "module: not found → suggestions",
       assert: d => d?.error === "MODULE_NOT_FOUND" || `expected MODULE_NOT_FOUND` },
+    { tool: "get_module_summary", args: { module: ".", workspace: ds.workspace },
+      label: "module: root overview",
+      assert: d => (d?.mode === "overview" || d?.total > 0) || `expected overview, got ${d?.mode}` },
     ...invalidWsTest("get_module_summary", ds, { module: ds.module }),
   ];
 
