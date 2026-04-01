@@ -2,7 +2,6 @@ import type { AppContext, WorkspaceServices, LanguageConventions } from "../type
 import type { FunctionRecord } from "../types/index.js";
 import { resolveWorkspaces, textResponse } from "./tool-utils.js";
 import { applyDensityAdjustment, countParamsFromSignature } from "./density-scorer.js";
-import { normalizeModuleQuery } from "../utils/file-utils.js";
 
 const MIN_SCORE = 0.4;
 
@@ -216,9 +215,7 @@ export async function handleSemanticSearch(
   }
 
   // Normalize scope: strip source root prefixes, convert dot notation
-  const scope = args.scope
-    ? normalizeModuleQuery(args.scope, ctx.config.parser.sourceRoot, ctx.conventions.sourceRoots).pop()!
-    : undefined;
+  const scope = args.scope ? ctx.normalizeModuleQuery(args.scope).pop()! : undefined;
 
   // Search all resolved workspaces and merge results
   const allResults: EnrichedResult[] = [];

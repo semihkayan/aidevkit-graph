@@ -282,6 +282,7 @@ export interface AppContext {
   readonly watcher: IFileWatcher;
   readonly git: IGitService;
   readonly reindex: IReindexOrchestrator;
+  normalizeModuleQuery(query: string): string[];
   ready: boolean;
   shutdown(): Promise<void>;
 }

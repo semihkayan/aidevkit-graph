@@ -1,6 +1,5 @@
 import type { AppContext, WorkspaceServices } from "../types/interfaces.js";
 import { resolveWorkspaces, textResponse } from "./tool-utils.js";
-import { normalizeModuleQuery } from "../utils/file-utils.js";
 
 function checkWorkspace(
   ws: WorkspaceServices,
@@ -107,7 +106,7 @@ export async function handleStaleDocstrings(
   // Pre-compute filePath-compatible scope candidates
   let scopeCandidates: string[] | null = null;
   if (args.scope) {
-    const normalized = normalizeModuleQuery(args.scope, ctx.config.parser.sourceRoot, ctx.conventions.sourceRoots);
+    const normalized = ctx.normalizeModuleQuery(args.scope);
     // Include original + normalized + expanded (prepend language roots for filePath matching)
     const expanded = normalized.flatMap(c =>
       ctx.conventions.sourceRoots.map(root => {
