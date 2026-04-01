@@ -326,10 +326,41 @@ function extractTypeRelationships(rootNode: SyntaxNode, filePath: string): RawTy
   return results;
 }
 
+function extractLocalVariables(rootNode: SyntaxNode, lineStart: number, lineEnd: number): Array<{ name: string; type: string }> {
+  const vars: Array<{ name: string; type: string }> = [];
+
+  // Standard local variable declarations: User user = ...;
+  for (const node of walkNodes(rootNode, ["local_variable_declaration"])) {
+    if (node.startPosition.row < lineStart || node.endPosition.row > lineEnd) continue;
+    const typeNode = node.childForFieldName("type");
+    if (!typeNode || typeNode.text === "var") continue;
+    const typeName = extractPrimaryTypeName(typeNode);
+    if (JAVA_PRIMITIVE_TYPES.has(typeName)) continue;
+    for (const decl of walkNodes(node, ["variable_declarator"])) {
+      const nameNode = decl.childForFieldName("name");
+      if (nameNode) vars.push({ name: nameNode.text, type: typeName });
+    }
+  }
+
+  // Enhanced for loop variables: for (User user : users) { ... }
+  for (const node of walkNodes(rootNode, ["enhanced_for_statement"])) {
+    if (node.startPosition.row < lineStart || node.endPosition.row > lineEnd) continue;
+    const typeNode = node.childForFieldName("type");
+    const nameNode = node.childForFieldName("name");
+    if (!typeNode || !nameNode || typeNode.text === "var") continue;
+    const typeName = extractPrimaryTypeName(typeNode);
+    if (!JAVA_PRIMITIVE_TYPES.has(typeName)) {
+      vars.push({ name: nameNode.text, type: typeName });
+    }
+  }
+
+  return vars;
+}
+
 export const javaConfig: TreeSitterLanguageConfig = {
   grammar: require("tree-sitter-java"),
   extensions: [".java"],
-  extractFunctions, extractCalls, extractImports, extractDocstring: getJavadoc, extractTypeRelationships,
+  extractFunctions, extractCalls, extractImports, extractDocstring: getJavadoc, extractTypeRelationships, extractLocalVariables,
 
   testDecorators: [
     "@Test", "@ParameterizedTest", "@RepeatedTest", "@BeforeEach", "@AfterEach",

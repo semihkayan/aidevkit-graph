@@ -259,16 +259,20 @@ export class TestHarness {
           functionWithBodyModule = bodyMatches.length > 1 ? rec.module : undefined;
         }
 
-        // Function with forward deps
+        // Function with forward deps — prefer unique names to avoid AMBIGUOUS_FUNCTION
         if (!functionWithDeps) {
           const entry = ws.callGraph.getEntry(rec.id);
-          if (entry && entry.calls.length > 0) functionWithDeps = rec.name;
+          if (entry && entry.calls.length > 0 && ws.index.findByName(rec.name).length === 1) {
+            functionWithDeps = rec.name;
+          }
         }
 
-        // Function with upstream callers (≥3 for meaningful impact)
+        // Function with upstream callers (≥3 for meaningful impact) — prefer unique names
         if (!functionWithCallers) {
           const entry = ws.callGraph.getEntry(rec.id);
-          if (entry && entry.calledBy.length >= 3) functionWithCallers = rec.name;
+          if (entry && entry.calledBy.length >= 3 && ws.index.findByName(rec.name).length === 1) {
+            functionWithCallers = rec.name;
+          }
         }
       }
     }
@@ -771,11 +775,16 @@ function buildReindexTests(ctx: AppContext, ds: DiscoveryState): TestCase[] {
     );
   }
 
-  cases.push(
-    { tool: "reindex", args: { workspace: ds.workspace, force: true },
-      label: "reindex: force full",
-      assert: d => (d?.status === "ok" && d?.mode?.startsWith("full")) || `status=${d?.status} mode=${d?.mode}` },
-  );
+  // Skip force full reindex if the index is already populated — setup() already
+  // built/loaded it. Avoids expensive re-embedding (~2min for large projects).
+  const ws = ctx.resolveWorkspace(ds.workspace);
+  if (ws.index.getStats().functions === 0) {
+    cases.push(
+      { tool: "reindex", args: { workspace: ds.workspace, force: true },
+        label: "reindex: force full",
+        assert: d => (d?.status === "ok" && d?.mode?.startsWith("full")) || `status=${d?.status} mode=${d?.mode}` },
+    );
+  }
 
   return cases;
 }

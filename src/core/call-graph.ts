@@ -14,6 +14,8 @@ export class CallGraphManager implements ICallGraphReader, ICallGraphWriter {
   // Populated by removeByFile(), consumed and cleared by buildForFiles().
   // Tracks callers whose forward edges were nullified so they can be re-resolved.
   private affectedCallerIds = new Set<string>();
+  // Transient: populated by processFiles(), used by resolveTargetIds(), cleared after resolution.
+  private localVarTypes = new Map<string, Array<{ name: string; type: string }>>();
 
   constructor(
     private importResolver: IImportResolver,
@@ -35,6 +37,7 @@ export class CallGraphManager implements ICallGraphReader, ICallGraphWriter {
 
     // Full scan — correct for full rebuild
     this.resolveTargetIds(index);
+    this.localVarTypes.clear();
     this.buildReverseGraph(index);
 
     return this.graph;
@@ -48,6 +51,7 @@ export class CallGraphManager implements ICallGraphReader, ICallGraphWriter {
     this.affectedCallerIds.clear();
 
     this.resolveTargetIds(index, toResolve);
+    this.localVarTypes.clear();
     this.addReverseEdgesForEntries(toResolve, index);
   }
 
@@ -206,6 +210,9 @@ export class CallGraphManager implements ICallGraphReader, ICallGraphWriter {
         const record = index.getById(recordId);
         if (!record || record.kind === "class") continue;
 
+        const localVars = parser.parseLocalVariables?.(source, record.lineStart, record.lineEnd) ?? [];
+        if (localVars.length > 0) this.localVarTypes.set(recordId, localVars);
+
         const rawCalls = parser.parseCalls(source, record.lineStart, record.lineEnd);
         const resolvedCalls = rawCalls.map(call => {
           const target = call.objectName ? `${call.objectName}.${call.name}` : call.name;
@@ -342,6 +349,15 @@ export class CallGraphManager implements ICallGraphReader, ICallGraphWriter {
       const memberType = this.typeGraph.getMemberType(className, parts[0]);
       if (memberType) {
         return this.resolveTypeChain(memberType, parts.slice(1), index);
+      }
+    }
+
+    // Pattern 4: localVar.method() — resolve via local variable type declarations
+    const localVars = this.localVarTypes.get(callerId);
+    if (localVars && parts.length >= 2) {
+      const varType = localVars.find(v => v.name === parts[0]);
+      if (varType) {
+        return this.resolveTypeChain(varType.type, parts.slice(1), index);
       }
     }
 

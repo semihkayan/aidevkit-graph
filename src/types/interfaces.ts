@@ -151,6 +151,7 @@ export interface ILanguageParser {
   parseCalls(source: string, lineStart: number, lineEnd: number): RawCallInfo[];
   parseImports(source: string, filePath: string): RawImportInfo[];
   parseTypeRelationships(source: string, filePath: string): RawTypeRelationship[];
+  parseLocalVariables?(source: string, lineStart: number, lineEnd: number): Array<{ name: string; type: string }>;
 
   // Import resolution — languages that support path resolution implement these
   resolveImportPath(
