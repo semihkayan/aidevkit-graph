@@ -1,4 +1,7 @@
 import path from "node:path";
+import { existsSync } from "node:fs";
+import { cp } from "node:fs/promises";
+import { execSync } from "node:child_process";
 import type { AppContext, WorkspaceServices } from "./types/interfaces.js";
 import { reembedFunctions } from "./core/reembed.js";
 import { FunctionIndex } from "./core/function-index.js";
@@ -267,5 +270,48 @@ export async function backgroundEmbed(
     } catch (err) {
       logger.error({ workspace: wsPath, err }, "Background embedding failed for workspace");
     }
+  }
+}
+
+/**
+ * In a git worktree with no cache, copy the main repo's .code-context/
+ * for a fast warm start. Worktree is fully isolated after the copy.
+ */
+export async function seedCacheFromMainRepo(projectRoot: string): Promise<boolean> {
+  const cacheDir = path.join(projectRoot, ".code-context");
+
+  // Already has cache? Nothing to seed.
+  if (existsSync(path.join(cacheDir, "ast-cache"))) return false;
+
+  // Detect git worktree — git-common-dir differs from ".git" only in worktrees
+  let mainRepoRoot: string;
+  try {
+    const gitCommonDir = execSync("git rev-parse --git-common-dir", {
+      cwd: projectRoot, encoding: "utf-8", timeout: 5000,
+    }).trim();
+    if (gitCommonDir === ".git" || gitCommonDir === path.join(projectRoot, ".git")) {
+      return false; // main checkout, not a worktree
+    }
+    mainRepoRoot = path.dirname(gitCommonDir);
+  } catch {
+    return false; // not a git repo or git not available
+  }
+
+  // Check if main repo has cache
+  const mainCache = path.join(mainRepoRoot, ".code-context");
+  if (!existsSync(path.join(mainCache, "ast-cache"))) return false;
+
+  // Copy cache, excluding per-process files
+  const skipFiles = new Set(["server.log", "server.pid"]);
+  try {
+    await cp(mainCache, cacheDir, {
+      recursive: true,
+      filter: (src) => !skipFiles.has(path.basename(src)),
+    });
+    logger.info({ from: mainCache, to: cacheDir }, "Seeded cache from main repo");
+    return true;
+  } catch (err) {
+    logger.warn({ err }, "Failed to seed cache from main repo, will cold start");
+    return false;
   }
 }
