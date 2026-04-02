@@ -8,7 +8,9 @@ CodeWeave is an MCP server that gives AI agents structured code intelligence ins
 
 It supports 7 languages (Python, TypeScript, JavaScript, Go, Rust, Java, C#) with a 6-stage hybrid search pipeline combining vector embeddings, full-text search, and structural density scoring. Everything runs locally with zero external dependencies beyond Ollama for embeddings. Monorepo and git worktree support included. A file watcher keeps indexes current as code changes — no manual reindexing needed.
 
-IMPORTANT: Run "npx @codeweave/mcp" in your project directory first. The setup wizard installs Ollama and the embedding model automatically. At first, it takes some time.
+ATTENTION: Run "npx @codeweave/mcp" in your project directory. The setup wizard will handle everything for you. At first, it may take some time.
+
+INFO: Exhaustively tested on large Java, C#, JavaScript, TypeScript, React codebases. Contributions and feedback are welcome.
 
 ## Category
 Developer Tools
