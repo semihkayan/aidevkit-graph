@@ -52,7 +52,7 @@ async function main() {
   }, (args) => handleModuleSummary(args as any, ctx));
 
   server.registerTool("get_function_source", {
-    description: "Get the source code of a specific function by name.\n\nIMPORTANT: Use this INSTEAD OF Read or cat when you need a single function. Reading an entire file to extract one function wastes tokens and pollutes your context window. This returns only the function you need. Supports: plain name ('processOrder'), class.method ('PaymentProcessor.refund'), or partial match. Use context_lines parameter to include surrounding imports or related code.",
+    description: "Get the source code of a specific function by name.\n\nCRITICAL: Use this INSTEAD OF Read or cat when you need a single function. Reading an entire file to extract one function wastes tokens and pollutes your context window. This returns only the function you need. Supports: plain name ('processOrder'), class.method ('PaymentProcessor.refund'), or partial match. Use context_lines parameter to include surrounding imports or related code.\n\nCRITICAL: When you add or modify a function, you MUST add a docstring with @deps (functions it calls) and @tags (e.g. critical, auth, payments). Docstrings feed semantic search, call graph validation, and impact analysis — without them, this tool suite loses most of its power.",
     inputSchema: FunctionSourceSchema.shape,
   }, (args) => handleFunctionSource(args as any, ctx));
 
@@ -67,7 +67,7 @@ async function main() {
   }, (args) => handleImpactAnalysis(args as any, ctx));
 
   server.registerTool("get_stale_docstrings", {
-    description: "Find functions with missing or outdated docstrings. Detects: missing docstrings, @deps that don't match actual AST calls, missing @tags. Use for codebase hygiene.",
+    description: "Find functions with missing or outdated docstrings. Detects: missing docstrings, @deps that don't match actual AST calls, missing @tags. Use for codebase hygiene.\n\nCRITICAL: Run this after writing code. Docstrings with @deps and @tags are what make semantic search, call graph, and impact analysis accurate — without them, the entire tool suite degrades. Fix what this tool reports.",
     inputSchema: StaleDocstringsSchema.shape,
   }, (args) => handleStaleDocstrings(args as any, ctx));
 
