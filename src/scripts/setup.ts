@@ -1,34 +1,52 @@
 #!/usr/bin/env node
 
-import { execSync, spawn } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync } from "node:fs";
+import { execSync, execFileSync, spawn } from "node:child_process";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, renameSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
 const OLLAMA_MODEL = "qwen3-embedding:0.6b";
+const DEBUG = process.argv.includes("--debug");
+const AUTO_YES = process.argv.includes("--yes") || process.argv.includes("-y") || !process.stdin.isTTY;
+const SKIP_OLLAMA = process.argv.includes("--skip-ollama");
+const SKIP_INDEX = process.argv.includes("--skip-index");
 
-// === Helpers ===
+// === Step Counter ===
+
+let currentStep = 0;
+const totalSteps = 5 - (SKIP_OLLAMA ? 2 : 0) - (SKIP_INDEX ? 1 : 0);
+function nextStep(msg: string) { console.log(`\n> ${++currentStep}/${totalSteps} ${msg}`); }
+
+// === Logging Helpers ===
 
 const warnings: string[] = [];
 function log(msg: string) { console.log(`  ${msg}`); }
 function ok(msg: string) { console.log(`  ✓ ${msg}`); }
 function warn(msg: string) { console.log(`  ⚠ ${msg}`); warnings.push(msg); }
 function fail(msg: string) { console.error(`  ✗ ${msg}`); }
-function step(msg: string) { console.log(`\n> ${msg}`); }
 
-function commandExists(cmd: string): boolean {
-  if (!/^[\w.@/-]+$/.test(cmd)) return false;
-  try {
-    const flag = os.platform() === "win32" ? "where" : "which";
-    execSync(`${flag} ${cmd}`, { stdio: "ignore" });
-    return true;
-  } catch { return false; }
-}
+// === Shell Helpers ===
 
 function runOrNull(cmd: string, opts?: { stdio?: "inherit" | "ignore" | "pipe" }): string | null {
   try {
     return execSync(cmd, { encoding: "utf-8", stdio: opts?.stdio || "pipe", timeout: 300_000 }).trim();
-  } catch { return null; }
+  } catch (err: any) {
+    if (DEBUG) {
+      const stderr = err?.stderr?.toString?.().trim();
+      if (stderr) console.error(`  [debug] ${cmd}: ${stderr}`);
+    }
+    return null;
+  }
+}
+
+function resolveCommand(cmd: string): string | null {
+  if (!/^[\w.@/-]+$/.test(cmd)) return null;
+  const which = os.platform() === "win32" ? "where" : "which";
+  return runOrNull(`${which} ${cmd}`)?.split(/\r?\n/)[0]?.trim() ?? null;
+}
+
+function commandExists(cmd: string): boolean {
+  return resolveCommand(cmd) !== null;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -43,6 +61,10 @@ async function ollamaHealthCheck(): Promise<boolean> {
 }
 
 async function confirm(question: string): Promise<boolean> {
+  if (AUTO_YES) {
+    log(`${question} (auto-yes)`);
+    return true;
+  }
   const readline = await import("node:readline");
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   return new Promise(resolve => {
@@ -103,34 +125,87 @@ function findSubWorkspaces(dir: string): string[] {
 }
 
 function isDangerousDir(dir: string): boolean {
+  const norm = os.platform() === "win32" ? (p: string) => p.toLowerCase() : (p: string) => p;
   const home = os.homedir();
   const dangerous = [home, "/", "/tmp", "/home", "/usr", "/var", "/etc", os.tmpdir()];
   if (os.platform() === "win32") {
     dangerous.push("C:\\", "C:\\Users", "C:\\Windows", "C:\\Program Files", "C:\\Program Files (x86)");
   }
-  return dangerous.includes(dir);
+  return dangerous.some(d => norm(d) === norm(dir));
 }
 
-// === Main ===
+// === MCP Config Helpers ===
 
-async function main() {
-  console.log("\n@codeweave/mcp — Setup\n");
+function resolvePackageScript(scriptRelPath: string, binName: string): string | null {
+  // Unix: try which first (returns symlink → JS file, upgrade-safe)
+  if (os.platform() !== "win32") {
+    const cmdPath = resolveCommand(binName);
+    if (cmdPath) return cmdPath;
+  }
+  // Windows always, Unix fallback: resolve via npm global root
+  const npmRoot = runOrNull("npm root -g");
+  if (!npmRoot) return null;
+  const scriptPath = path.join(npmRoot, "@codeweave", "mcp", scriptRelPath);
+  return existsSync(scriptPath) ? scriptPath : null;
+}
 
+function resolveServerScript(): string | null {
+  return resolvePackageScript("dist/index.js", "codeweave-server");
+}
+
+function needsConfigUpdate(entry: any): boolean {
+  if (!entry || typeof entry !== "object") return false;
+  const cmd = entry.command;
+  if (typeof cmd !== "string") return false;
+  // Bare command name (old format, PATH-dependent)
+  if (!cmd.includes("/") && !cmd.includes("\\")) return true;
+  // Node binary no longer exists (e.g., brew upgrade changed the path)
+  if (!existsSync(cmd)) return true;
+  // Server script no longer exists (e.g., npm uninstall/upgrade)
+  const args = entry.args;
+  if (Array.isArray(args) && typeof args[0] === "string" && !existsSync(args[0])) return true;
+  return false;
+}
+
+function upsertMcpConfig(
+  configPath: string, serversKey: string, label: string,
+  mcpEntry: Record<string, any>, ensureDir?: string,
+): void {
+  let config: Record<string, any> = {};
+  if (existsSync(configPath)) {
+    try { config = JSON.parse(readFileSync(configPath, "utf-8")); } catch { config = {}; }
+  }
+  if (typeof config[serversKey] !== "object" || config[serversKey] === null) {
+    config[serversKey] = {};
+  }
+  const existing = config[serversKey].codeweave;
+  if (existing && !needsConfigUpdate(existing)) {
+    ok(`${label}: already configured`);
+    return;
+  }
+  config[serversKey].codeweave = mcpEntry;
+  try {
+    if (ensureDir) mkdirSync(ensureDir, { recursive: true });
+    const tmpPath = configPath + ".tmp";
+    writeFileSync(tmpPath, JSON.stringify(config, null, 2));
+    renameSync(tmpPath, configPath);
+    ok(`${label}: ${existing ? "updated" : "configured"}`);
+  } catch (err: any) {
+    warn(`${label}: failed to write — ${err.message}`);
+  }
+}
+
+// === Step Functions ===
+
+async function validateProjectDir(): Promise<string> {
   const cwd = process.cwd();
 
-  // Windows download size warning
-  if (os.platform() === "win32" && !commandExists("ollama")) {
-    log("Note: Setup will download ~2.5 GB (Ollama + embedding model).");
-  }
-
-  // Safety check
   if (isDangerousDir(cwd)) {
     fail(`Cannot run setup in ${cwd}`);
     fail("cd into your project directory first.\n");
     process.exit(1);
   }
 
-  // Project detection
   const hasGit = existsSync(path.join(cwd, ".git"));
   const rootHasManifest = hasManifest(cwd);
   const subWorkspaces = findSubWorkspaces(cwd);
@@ -155,9 +230,13 @@ async function main() {
     process.exit(1);
   }
 
-  // === Step 1: Install or update package globally ===
-  step("1/5 Installing @codeweave/mcp...");
+  return cwd;
+}
+
+async function installOrUpdatePackage(): Promise<{ forceReindex: boolean; installFailed: boolean }> {
   let forceReindex = false;
+  let installFailed = false;
+
   const installedVersion = getInstalledVersion();
   if (installedVersion) {
     const latestVersion = getLatestVersion();
@@ -171,6 +250,7 @@ async function main() {
           forceReindex = true;
         } else {
           warn("Update failed. Try manually: npm install -g @codeweave/mcp@latest");
+          if (os.platform() === "win32") warn("On Windows, you may need to run as Administrator.");
         }
       } else {
         ok(`Keeping ${installedVersion}`);
@@ -184,158 +264,168 @@ async function main() {
       ok("Installed");
     } else {
       fail("Installation failed. Try manually: npm install -g @codeweave/mcp");
-      fail("Continuing without global install — some features may not work.");
+      if (os.platform() === "win32") fail("On Windows, you may need to run as Administrator.");
+      installFailed = true;
     }
   }
 
-  // === Step 2: Install Ollama ===
-  step("2/5 Installing Ollama...");
-  if (commandExists("ollama")) {
-    ok("Already installed");
+  return { forceReindex, installFailed };
+}
+
+function tryInstallOllama(method: string, installCmd: string): boolean {
+  log(`Trying ${method}...`);
+  runOrNull(installCmd, { stdio: "inherit" });
+  return commandExists("ollama");
+}
+
+function fixOllamaPath(): boolean {
+  const platform = os.platform();
+  const binary = platform === "win32" ? "ollama.exe" : "ollama";
+  const sep = path.delimiter;
+  const knownPaths: string[] = [];
+
+  if (platform === "darwin") {
+    knownPaths.push("/opt/homebrew/bin", "/usr/local/bin");
+  } else if (platform === "win32") {
+    knownPaths.push(
+      path.join(os.homedir(), "AppData", "Local", "Programs", "Ollama"),
+      "C:\\ProgramData\\chocolatey\\bin",
+    );
   } else {
-    const platform = os.platform();
-
-    if (platform === "darwin") {
-      if (commandExists("brew")) {
-        runOrNull("brew install ollama", { stdio: "inherit" });
-      } else {
-        warn("Homebrew not found. Install Ollama manually: https://ollama.com/download");
-      }
-    } else if (platform === "win32") {
-      if (commandExists("winget")) {
-        log("Installing via winget (may require admin)...");
-        runOrNull("winget install -e --id Ollama.Ollama", { stdio: "inherit" });
-      } else {
-        warn("Install Ollama manually: https://ollama.com/download");
-      }
-    } else {
-      log("Installing via official script...");
-      runOrNull("curl -fsSL https://ollama.com/install.sh | sh", { stdio: "inherit" });
-    }
-
-    // On Windows, winget installs Ollama but doesn't always add it to PATH
-    if (!commandExists("ollama") && platform === "win32") {
-      const ollamaDir = path.join(os.homedir(), "AppData", "Local", "Programs", "Ollama");
-      if (existsSync(path.join(ollamaDir, "ollama.exe"))) {
-        const currentPath = process.env.PATH || "";
-        if (!currentPath.includes(ollamaDir)) {
-          process.env.PATH = `${currentPath};${ollamaDir}`;
-          log("Added Ollama to PATH for this session");
-          log("To make permanent, add to your PATH: " + ollamaDir);
-        }
-      }
-    }
-
-    if (commandExists("ollama")) {
-      ok("Installed");
-    } else {
-      warn("Could not install Ollama. Semantic search will work in degraded mode.");
-      warn("Install manually: https://ollama.com/download");
-    }
+    knownPaths.push("/usr/local/bin", "/usr/bin", "/snap/bin");
   }
 
-  // === Step 3: Pull embedding model ===
-  step("3/5 Downloading embedding model...");
+  for (const dir of knownPaths) {
+    if (existsSync(path.join(dir, binary))) {
+      const currentPath = process.env.PATH || "";
+      if (!currentPath.split(sep).includes(dir)) {
+        process.env.PATH = `${currentPath}${sep}${dir}`;
+        log(`Found Ollama in ${dir}, added to PATH for this session`);
+      }
+      if (commandExists("ollama")) return true;
+    }
+  }
+  return false;
+}
+
+function installOllama(): void {
+  // Check PATH first, then known install locations
+  if (commandExists("ollama") || fixOllamaPath()) {
+    ok("Already installed");
+    return;
+  }
+
+  const platform = os.platform();
+  let installed = false;
+
+  if (platform === "darwin") {
+    if (!installed && commandExists("brew"))
+      installed = tryInstallOllama("Homebrew", "brew install ollama") || fixOllamaPath();
+    if (!installed && commandExists("curl"))
+      installed = tryInstallOllama("install script", "curl -fsSL https://ollama.com/install.sh | sh") || fixOllamaPath();
+
+  } else if (platform === "win32") {
+    if (!installed && commandExists("winget"))
+      installed = tryInstallOllama("winget", "winget install -e --id Ollama.Ollama --accept-package-agreements --accept-source-agreements") || fixOllamaPath();
+    if (!installed && commandExists("choco"))
+      installed = tryInstallOllama("Chocolatey", "choco install ollama -y") || fixOllamaPath();
+
+  } else {
+    if (!installed && commandExists("curl"))
+      installed = tryInstallOllama("install script", "curl -fsSL https://ollama.com/install.sh | sh") || fixOllamaPath();
+    if (!installed && commandExists("wget"))
+      installed = tryInstallOllama("install script (wget)", "wget -qO- https://ollama.com/install.sh | sh") || fixOllamaPath();
+  }
+
+  if (installed) ok("Installed");
+  else { warn("Could not install Ollama. Semantic search will work in degraded mode."); warn("Install manually: https://ollama.com/download"); }
+}
+
+async function pullEmbeddingModel(): Promise<void> {
   if (!commandExists("ollama")) {
     warn("Ollama not available — skipping model download.");
-  } else {
-    // Ensure Ollama is running
-    if (!(await ollamaHealthCheck())) {
-      log("Starting Ollama...");
-      const child = spawn("ollama", ["serve"], { detached: true, stdio: "ignore" });
-      child.unref();
+    return;
+  }
 
-      let started = false;
-      for (let i = 0; i < 15; i++) {
-        await sleep(1000);
-        if (await ollamaHealthCheck() && runOrNull("ollama list") !== null) { started = true; break; }
-      }
-      if (!started) {
-        warn("Could not start Ollama. Start it manually: ollama serve");
-      }
+  // Ensure Ollama is running
+  if (!(await ollamaHealthCheck())) {
+    log("Starting Ollama...");
+    const child = spawn("ollama", ["serve"], { detached: true, stdio: "ignore" });
+    child.unref();
+
+    let started = false;
+    for (let i = 0; i < 15; i++) {
+      await sleep(1000);
+      if (await ollamaHealthCheck()) { started = true; break; }
     }
+    if (!started) {
+      warn("Could not start Ollama. Start it manually: ollama serve");
+    }
+  }
 
-    // Check if model exists
-    if (await ollamaHealthCheck()) {
-      const models = runOrNull("ollama list") || "";
-      if (models.includes(OLLAMA_MODEL.split(":")[0])) {
-        ok(`${OLLAMA_MODEL} ready`);
-      } else {
-        log(`Pulling ${OLLAMA_MODEL}...`);
+  // Check if model exists
+  if (await ollamaHealthCheck()) {
+    const models = runOrNull("ollama list") || "";
+    if (models.includes(OLLAMA_MODEL.split(":")[0])) {
+      ok(`${OLLAMA_MODEL} ready`);
+    } else {
+      log(`Pulling ${OLLAMA_MODEL}...`);
+      for (let attempt = 0; attempt < 2; attempt++) {
+        if (attempt > 0) log("Retrying download...");
         try {
-          execSync(`ollama pull ${OLLAMA_MODEL}`, {
-            stdio: "inherit",
-            env: { ...process.env, OLLAMA_INSECURE: "true" },
-          });
-        } catch { /* handled below */ }
-        const modelsAfter = runOrNull("ollama list") || "";
-        if (modelsAfter.includes(OLLAMA_MODEL.split(":")[0])) {
-          ok("Model downloaded");
-        } else {
-          warn("Model download failed. Try manually: ollama pull " + OLLAMA_MODEL);
-        }
+          execSync(`ollama pull ${OLLAMA_MODEL}`, { stdio: "inherit" });
+          break;
+        } catch { /* retry */ }
+      }
+      const modelsAfter = runOrNull("ollama list") || "";
+      if (modelsAfter.includes(OLLAMA_MODEL.split(":")[0])) {
+        ok("Model downloaded");
+      } else {
+        warn("Model download failed. Try manually: ollama pull " + OLLAMA_MODEL);
       }
     }
   }
+}
 
-  // === Step 4: Configure MCP clients ===
-  step("4/5 Configuring MCP clients...");
-  const mcpConfigPath = path.join(cwd, ".mcp.json");
+function configureMcpClients(cwd: string, installFailed: boolean): void {
+  // Resolve absolute paths so MCP clients don't depend on PATH
+  // Prefer symlink paths (survive upgrades), fall back to process.execPath
+  const nodePath = resolveCommand("node") || process.execPath;
+  const serverPath = resolveServerScript();
 
-  let mcpConfig: Record<string, any> = {};
-  if (existsSync(mcpConfigPath)) {
-    try { mcpConfig = JSON.parse(readFileSync(mcpConfigPath, "utf-8")); } catch { mcpConfig = {}; }
-  }
-
-  if (mcpConfig.mcpServers?.codeweave) {
-    ok("Claude Code: already configured");
+  let mcpEntry: Record<string, any> | null = null;
+  if (serverPath) {
+    mcpEntry = { command: nodePath, args: [serverPath] };
+  } else if (!installFailed) {
+    mcpEntry = { command: "codeweave-server" };
+    warn("Could not resolve codeweave-server path. MCP config may not work in all environments.");
   } else {
-    if (typeof mcpConfig.mcpServers !== "object" || mcpConfig.mcpServers === null) {
-      mcpConfig.mcpServers = {};
-    }
-    mcpConfig.mcpServers.codeweave = { command: "codeweave-server" };
-    const tmpPath = mcpConfigPath + ".tmp";
-    writeFileSync(tmpPath, JSON.stringify(mcpConfig, null, 2));
-    const { renameSync } = await import("node:fs");
-    renameSync(tmpPath, mcpConfigPath);
-    ok("Claude Code: added to .mcp.json");
+    warn("Skipping MCP client config — global install failed.");
   }
 
-  // 4b: VS Code Copilot — .vscode/mcp.json
-  const vscodeMcpPath = path.join(cwd, ".vscode", "mcp.json");
-
-  let vscodeMcpConfig: Record<string, any> = {};
-  if (existsSync(vscodeMcpPath)) {
-    try { vscodeMcpConfig = JSON.parse(readFileSync(vscodeMcpPath, "utf-8")); } catch { vscodeMcpConfig = {}; }
+  if (mcpEntry) {
+    const mcpConfigPath = path.join(cwd, ".mcp.json");
+    const vscodeMcpPath = path.join(cwd, ".vscode", "mcp.json");
+    upsertMcpConfig(mcpConfigPath, "mcpServers", "Claude Code", mcpEntry);
+    upsertMcpConfig(vscodeMcpPath, "servers", "VS Code", mcpEntry, path.join(cwd, ".vscode"));
   }
+}
 
-  if (vscodeMcpConfig.servers?.["codeweave"]) {
-    ok("VS Code: already configured");
-  } else {
-    if (typeof vscodeMcpConfig.servers !== "object" || vscodeMcpConfig.servers === null) {
-      vscodeMcpConfig.servers = {};
-    }
-    vscodeMcpConfig.servers["codeweave"] = { command: "codeweave-server" };
-    mkdirSync(path.join(cwd, ".vscode"), { recursive: true });
-    const tmpPath2 = vscodeMcpPath + ".tmp";
-    writeFileSync(tmpPath2, JSON.stringify(vscodeMcpConfig, null, 2));
-    const { renameSync } = await import("node:fs");
-    renameSync(tmpPath2, vscodeMcpPath);
-    ok("VS Code: added to .vscode/mcp.json");
-  }
-
-  // === Step 5: Index project ===
-  step("5/5 Indexing project...");
+function indexProject(cwd: string, forceReindex: boolean): void {
   const codeContextDir = path.join(cwd, ".code-context");
-
   const hasAstCache = existsSync(path.join(codeContextDir, "ast-cache"));
   const hasVectors = existsSync(path.join(codeContextDir, "lance"));
 
   if (hasAstCache && hasVectors && !forceReindex) {
     ok("Already indexed. Run 'codeweave-init --force' to rebuild.");
-  } else if (commandExists("codeweave-init")) {
+    return;
+  }
+
+  const initScript = resolvePackageScript("dist/scripts/init.js", "codeweave-init");
+  if (initScript) {
+    const nodePath = resolveCommand("node") || process.execPath;
     try {
-      execSync(`codeweave-init${forceReindex ? " --force" : ""}`, { stdio: "inherit", cwd });
+      execFileSync(nodePath, [initScript, ...(forceReindex ? ["--force"] : [])], { stdio: "inherit", cwd });
       ok("Project indexed");
     } catch {
       warn("Indexing failed. Try manually: codeweave-init");
@@ -343,10 +433,25 @@ async function main() {
   } else {
     warn("codeweave-init not found. Run 'npm install -g @codeweave/mcp' then 'codeweave-init'");
   }
+}
 
-  // === Done ===
+function updateGitignore(cwd: string): void {
+  const gitignorePath = path.join(cwd, ".gitignore");
+  if (!existsSync(gitignorePath)) return;
+  const content = readFileSync(gitignorePath, "utf-8");
+  if (content.includes(".code-context")) return;
+  const separator = content.endsWith("\n") ? "" : "\n";
+  try {
+    const tmpPath = gitignorePath + ".tmp";
+    writeFileSync(tmpPath, content + separator + ".code-context/\n");
+    renameSync(tmpPath, gitignorePath);
+    ok("Added .code-context/ to .gitignore");
+  } catch { /* non-critical */ }
+}
+
+function printSummary(installFailed: boolean): void {
   console.log("\n========================================");
-  console.log("  Setup complete!");
+  console.log(installFailed ? "  Setup incomplete — see warnings above" : "  Setup complete!");
   console.log("========================================\n");
   if (warnings.length > 0) {
     console.log("  Warnings:");
@@ -356,17 +461,39 @@ async function main() {
   console.log("  Open this project in Claude Code.");
   console.log("  Try: 'find the authentication code'");
   console.log("  Or:  'what calls this function?'\n");
+}
 
-  // .gitignore — add .code-context/ if .gitignore exists
-  const gitignorePath = path.join(cwd, ".gitignore");
-  if (existsSync(gitignorePath)) {
-    const content = readFileSync(gitignorePath, "utf-8");
-    if (!content.includes(".code-context")) {
-      const separator = content.endsWith("\n") ? "" : "\n";
-      writeFileSync(gitignorePath, content + separator + ".code-context/\n");
-      ok("Added .code-context/ to .gitignore");
-    }
+// === Main ===
+
+async function main() {
+  console.log("\n@codeweave/mcp — Setup\n");
+
+  if (os.platform() === "win32" && !SKIP_OLLAMA && !commandExists("ollama")) {
+    log("Note: Setup will download ~2.5 GB (Ollama + embedding model).");
   }
+
+  const cwd = await validateProjectDir();
+
+  nextStep("Installing @codeweave/mcp...");
+  const { forceReindex, installFailed } = await installOrUpdatePackage();
+
+  if (!SKIP_OLLAMA) {
+    nextStep("Installing Ollama...");
+    installOllama();
+    nextStep("Downloading embedding model...");
+    await pullEmbeddingModel();
+  }
+
+  nextStep("Configuring MCP clients...");
+  configureMcpClients(cwd, installFailed);
+
+  if (!SKIP_INDEX) {
+    nextStep("Indexing project...");
+    indexProject(cwd, forceReindex);
+  }
+
+  updateGitignore(cwd);
+  printSummary(installFailed);
 }
 
 main().catch(err => {
