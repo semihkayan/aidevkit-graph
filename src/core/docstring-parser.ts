@@ -6,6 +6,7 @@ export class DocstringParser implements IDocstringParser {
     return {
       raw,
       summary: this.extractSummary(raw),
+      body: this.stripAnnotationFields(raw),
       deps: this.extractField(raw, "deps"),
       sideEffects: this.extractField(raw, "side_?effects"),
       tags: this.extractField(raw, "tags"),
@@ -31,6 +32,13 @@ export class DocstringParser implements IDocstringParser {
       .split(",")
       .map(s => s.trim())
       .filter(Boolean);
+  }
+
+  private stripAnnotationFields(raw: string): string {
+    return raw
+      .replace(/^\s*@\w+\s*:?\s*[^\n]*(?:\n(?!\s*@|\s*$)[^\n]*)*/gim, "")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
   }
 
   private extractSingleField(raw: string, fieldName: string): string | null {

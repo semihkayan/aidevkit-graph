@@ -57,6 +57,7 @@ export interface StructuralHints {
 export interface ParsedDocstring {
   raw: string;
   summary: string;
+  body: string;
   deps: string[];
   sideEffects: string[];
   tags: string[];

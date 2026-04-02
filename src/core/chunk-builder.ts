@@ -55,8 +55,8 @@ export function buildChunk(
 
   // Docstring content (no labels — the content speaks for itself)
   if (record.docstring) {
-    if (record.docstring.summary) {
-      parts.push(record.docstring.summary);
+    if (record.docstring.body) {
+      parts.push(record.docstring.body);
     }
     if (record.docstring.tags.length > 0) {
       parts.push(record.docstring.tags.join(", "));
