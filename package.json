@@ -1,6 +1,6 @@
 {
   "name": "@codeweave/mcp",
-  "version": "0.1.19",
+  "version": "0.1.20",
   "mcpName": "io.github.semihkayan/codeweave",
   "description": "Codebase graph analysis for AI agents — AST + call graph + type graph + hybrid semantic search via MCP",
   "type": "module",

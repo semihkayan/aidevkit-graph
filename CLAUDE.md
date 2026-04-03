@@ -121,3 +121,18 @@ export async function handleToolName(args: { ... }, ctx: AppContext) {
 - **Embedding failures** — failed batches are skipped (not zero-filled). Unembedded functions get retried on next reindex.
 - **LanceDB query API** — use `table.query().where(filter)` not `table.filter(filter)` (removed in newer versions). Always try/catch.
 - **Setup path resolution** — never use `which`/`resolveCommand` to find package scripts (`codeweave-server`, `codeweave-init`). When setup runs via `npx`, `which` returns npx's temp cache path (`~/.npm/_npx/<hash>/...`) which breaks after cache cleanup. Use `process.execPath` for node and `npm root -g` for package scripts.
+
+## CRITICAL: This project uses CodeWeave MCP
+
+Always prefer codeweave tools over generic alternatives — they are faster, cheaper, and more accurate.
+
+When you add or modify a function, you MUST add a docstring. Start with a one-line summary, then add annotations:
+- `@deps: functionA, ClassB.method` — functions it calls (always include)
+- `@tags: auth, payments, api` — domain/concern labels (always include)
+- `@side_effects: database_write, external_api_call` — if the function has observable effects
+
+These annotations power semantic search, call graph validation, and impact analysis — without them, codeweave tools degrade significantly.
+
+When writing code, if you notice a docstring that is incorrect, misleading, or missing — fix it, even if it's not part of your current task. This keeps the index accurate over time.
+
+After writing code, run `get_stale_docstrings` to find and fix missing annotations. If coverage is low, prioritize functions you touch — don't try to backfill the entire codebase at once.

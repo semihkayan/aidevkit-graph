@@ -1,6 +1,8 @@
 import type { FunctionRecord } from "../types/index.js";
 import { truncateToTokens } from "../utils/token-estimator.js";
 
+const BODY_REPEAT_MAX_CHARS = 250;
+
 export interface ChunkConfig {
   expandCamelCase: boolean;
   maxChunkTokens?: number;
@@ -78,6 +80,16 @@ export function buildChunk(
   // Call targets as implicit deps — only when docstring doesn't have curated @deps
   if (!record.docstring?.deps?.length && callTargets?.length) {
     parts.push(`depends on: ${callTargets.join(", ")}`);
+  }
+
+  // Reinforcement: repeat key semantic signals for embedding emphasis.
+  // Placed last so truncation cuts these first, preserving original content.
+  parts.push(expand(record.name));
+  if (record.docstring?.tags.length) {
+    parts.push(record.docstring.tags.join(", "));
+  }
+  if (record.docstring?.body && record.docstring.body.length < BODY_REPEAT_MAX_CHARS) {
+    parts.push(record.docstring.body);
   }
 
   let chunk = parts.join("\n");

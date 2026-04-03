@@ -6,12 +6,12 @@
     "url": "https://github.com/semihkayan/codeweave-mcp",
     "source": "github"
   },
-  "version": "0.1.18",
+  "version": "0.1.20",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "@codeweave/mcp",
-      "version": "0.1.18",
+      "version": "0.1.20",
       "transport": {
         "type": "stdio"
       }
